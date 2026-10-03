@@ -1,0 +1,9 @@
+# Packages needed to run the code (Requirement 4.10).
+# TODO: pin each line to the version installed in the course Nuvolos workspace,
+# for example pandas==x.y.z.
+ipykernel
+matplotlib
+nbconvert
+numpy
+pandas
+scikit-learn

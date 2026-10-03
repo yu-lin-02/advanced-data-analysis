@@ -1,0 +1,11 @@
+# Keeps caches, checkpoints, virtual environments and editor settings out of
+# the repository (Requirement 4.12).
+# The first five lines come from the course document "Starting and Shipping
+# Your Project" (section "Keep the repository clean"). The last one keeps
+# API keys and passwords out.
+__pycache__/
+.ipynb_checkpoints/
+.venv/
+.DS_Store
+.vscode/
+.env
