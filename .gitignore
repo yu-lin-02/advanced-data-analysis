@@ -1,5 +1,6 @@
 # Keeps caches, checkpoints, virtual environments and editor settings out of
 # the repository (Requirement 4.12).
+# Drafted with Claude (Anthropic). Asked for: a .gitignore for this project.
 # The first five lines come from the course document "Starting and Shipping
 # Your Project" (section "Keep the repository clean"). The last one keeps
 # API keys and passwords out.
