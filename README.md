@@ -1,4 +1,4 @@
-# Semester project: Advanced Data Analytics, HEC Lausanne, autumn 2026
+# Semester project: Advanced Data Analysis, HEC Lausanne, autumn 2026
 
 <!-- Outline drafted with Claude (Anthropic). Asked for: a README skeleton in the order given in the course document "Starting and Shipping Your Project". -->
 
