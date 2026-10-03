@@ -1,0 +1,40 @@
+# Drafted with Claude (Anthropic). Asked for: a GitHub Actions workflow that
+# repeats, on every push, the reproduction test described in the course
+# document "Starting and Shipping Your Project": take a fresh copy of the
+# repository, install what requirements.txt lists, run the stages in order.
+name: reproduce
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  reproduce:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Get a fresh copy of the repository
+        uses: actions/checkout@v7
+
+      - name: Set up Python 3.12, the version in the Nuvolos workspace
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install only what requirements.txt lists (Requirement 4.10)
+        run: pip install -r requirements.txt
+
+      - name: No caches, checkpoints, virtual environments or editor files (Requirement 4.12)
+        run: |
+          if git ls-files | grep -E '(^|/)(__pycache__|\.ipynb_checkpoints|\.venv|\.vscode)/|(^|/)\.DS_Store$'; then
+            echo "The files listed above should not be in the repository."
+            exit 1
+          fi
+
+      - name: Run the stages in order, each in a fresh kernel (Requirements 4.7 and 4.8)
+        run: python code/run_all.py
