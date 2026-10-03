@@ -1,9 +1,11 @@
 # Packages needed to run the code (Requirement 4.10).
-# TODO: pin each line to the version installed in the course Nuvolos workspace,
-# for example pandas==x.y.z.
-ipykernel
-matplotlib
-nbconvert
-numpy
-pandas
-scikit-learn
+# Drafted with Claude (Anthropic). Asked for: the list of packages the code
+# needs, pinned to the versions in the course Nuvolos workspace.
+# Versions read in that workspace (Python 3.12.12) with "pip list" on
+# 3 October 2026.
+ipykernel==7.1.0
+matplotlib==3.10.8
+nbconvert==7.16.6
+numpy==2.3.5
+pandas==2.3.3
+scikit-learn==1.8.0
