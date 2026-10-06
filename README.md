@@ -24,8 +24,8 @@ python code/run_all.py
 
 | Order | File | What it does |
 |---|---|---|
-| 1 | `code/01_get_data.ipynb` | Gets the raw data. Only runs with `python code/run_all.py --download`. |
-| 2 | `code/02_clean.ipynb` | Cleans the raw data and saves the table the models use. |
+| 1 | `code/01_get_data.ipynb` | Downloads the CEPII Gravity file into `data/raw/` (not committed), checks it, and saves the rows of 2017 and 2019 in `data/gravity_extract.csv` (committed). Only runs with `python code/run_all.py --download`. |
+| 2 | `code/02_clean.ipynb` | Cleans `data/gravity_extract.csv` and saves the table the models use. |
 | 3 | `code/03_model.ipynb` | Fits the models and saves the results. |
 | 4 | `code/04_figures.ipynb` | Makes every figure and table shown in the paper. |
 
@@ -34,7 +34,7 @@ python code/run_all.py
 ## Time and output
 
 - Running time: TODO, measure in the Nuvolos workspace.
-- Resources beyond the Nuvolos workspace: none.
+- Resources beyond the Nuvolos workspace: none. Stage 1 downloads 207 MB from CEPII and needs about 1.5 GB of free disk space; the other stages start from the committed extract.
 - Output: the figures and tables of the paper, saved in `figures/`.
 
 ## Data
