@@ -1,0 +1,378 @@
+<!-- Drafted with Claude (Anthropic). Asked for: a build plan from which Claude Code can code the project, following the design as it stood on 3 October 2026, revised on 6 October 2026 for Yu's decisions of that day: the gravity equation estimated by PPML, flows predicted in dollars, the Poisson deviance as the score, tree ensembles with the Poisson loss. Revised again on 17 October 2026, after the sign-off, at Yu's request to pause the development-year run at an intermediate point and review it before the larger training sizes: stage 3 run first on the sizes up to 1,000, a checkpoint whose allowed changes are fixed in advance, then stage 3 in full; a freeze before the analysis year; training deviance in the learning curves; a selection table (a confusion matrix of the model picked against the model that won) at the checkpoint and in stage 5; and decision 12 on how the cutoff is read when `ppml` is behind at the smallest sizes. Three independent reviews (method, feasibility, completeness) checked this revision the same day, and their verified findings are folded in. Revised on 18 October 2026 after Yu's questions of that day (`notes/answers-2026-10-18.md`, `notes/colonial-tie-flag.md`): decisions 13 to 16 added, on the colonial-tie flag (to be settled before stage 2), and on recording the coefficients of `ppml`, a ridge reference line and a rule for thin indicators (all three before part 1); the checkpoint report gains item 9, and the checkpoint rules are unchanged. A final review the same day filled gaps where Claude Code would have had to guess (section 5 items 2 and 3, stage 3, the checkpoint report, stages 4 and 5, `run_draw`). The counts in section 3 were read from Yu's copy of the CEPII file on 3 October 2026. Place this file at docs/build_plan.md. Paths under `notes/` and `plan/` name files in Yu's project files, not in the repository. -->
+
+# Build plan
+
+The question: in predicting bilateral trade flows, does the amount of training data decide whether the gravity regression or a tuned tree ensemble predicts best, and can a rule built from the bias and variance of the models select as well as cross-validation does?
+
+## 0. Status
+
+Yu edits this block. Claude Code never does.
+
+- Proposal sent to the teaching assistant: yes
+- Sign-off received by return email (Requirement 3.3): yes ("TA has signed up", Yu, 17 October 2026; both lines set to yes by Claude at Yu's request on 18 October 2026)
+- Date of the sign-off:
+- Changes asked for at sign-off:
+
+While "Sign-off received" says no, only Phase A is open: the plumbing of section 5 and stages 1 and 2. If the sign-off changes the scope, sections 1 and 6 are revised with Yu before any code is written.
+
+## 1. The design in brief
+
+- One observation is one ordered country pair in one year. The target is `tradeflow_baci`, the trade flow from origin to destination in thousand current USD, in levels. No model is fitted to its log.
+- Every model gets the same eight predictors: `ln_gdp_o`, `ln_gdp_d`, `ln_dist`, and the indicators `contig`, `comlang_off`, `col_dep_ever`, `comcol`, `fta_wto`.
+- Test error is the mean Poisson deviance of the predicted flows on held-out pairs: `sklearn.metrics.mean_poisson_deviance`, with `d(y, m) = 2*(y*ln(y/m) - y + m)` per pair. Recorded next to it: D squared (`sklearn.metrics.d2_tweedie_score` with `power=1`, which compares the model with predicting the mean test flow), and the mean absolute error and the root mean squared error, each divided by the mean test flow (as in Apfel et al., p. 16).
+- Three candidate models, all from scikit-learn, all fitted with the Poisson loss:
+
+| Name | Model | Settings tried |
+|---|---|---|
+| `ppml` | `PoissonRegressor(alpha=0, solver="newton-cholesky")` on the eight predictors. This is the gravity equation in multiplicative form estimated by Poisson pseudo-maximum likelihood: nine coefficients with the intercept. `alpha=0` is required: the default `alpha=1` adds a ridge penalty | none |
+| `rf` | `RandomForestRegressor(criterion="poisson")` with 100 trees | `max_features`: 1.0 (all eight) or 3. `min_samples_leaf`: 1, 5 or 20. Six settings, six fits |
+| `gbm` | `HistGradientBoostingRegressor(loss="poisson")`, learning rate 0.1, 500 trees (`max_iter`), `min_samples_leaf=20`, `max_leaf_nodes=None`, `early_stopping=False` | `max_depth`: 1, 2, 3 or 5. Trees used: 25, 50, 100, 200, 300, 400 or 500. Twenty-eight settings from four fits (section 7, staged prediction) |
+
+- `GradientBoostingRegressor` is not used: it has no Poisson loss.
+- Two reference lines are scored and are never candidates: `mean` (the mean training flow) and `tree` (one `DecisionTreeRegressor(criterion="poisson")` grown to full depth).
+- A configuration is a model at one setting. One training sample gives 13 fits and 37 scored configurations: 35 candidates (1 + 6 + 28) and 2 reference lines.
+- Two years, two roles. The development year is for exploring: every configuration is scored, the error is split, the settings are tuned on its test set, and the size rule is built. The analysis year is for confirming: settings come from the development year and nothing is tuned on its test set.
+- Two pauses. Stage 3 runs first on the sizes up to 1,000 (part 1). Then comes a checkpoint: a report on part 1, and the few changes that rules fixed in advance allow (section 6). Then stage 3 runs in full on every size, 2,000 and 5,000 included. Before the analysis year is read, a second pause freezes every setting and the size rule (end of stage 4).
+- H1 (cutoff): there is a training size n* below which `ppml` has lower test error than both tuned ensembles, and above which at least one ensemble has lower test error. The development year gives an exploratory n*. H1 is tested in the analysis year at the frozen settings (stage 5, `analysis_cutoff.csv`). Decision 12 says which summary of the draws decides, and how the cutoff is read when `ppml` is behind at the smallest sizes.
+- H2 (selection): the size rule has test error within two standard errors of cross-validated selection at every training size, at lower fitting cost.
+- Mechanism check, not a hypothesis: with more noise in the training flows (decision 5), n* should move to a larger size.
+- Either outcome of H1 and H2 is a result. The code reports what it finds. No notebook contains a sentence that words a conclusion in advance.
+
+## 2. Decisions
+
+These are Yu's. The default is what the code uses until Yu says otherwise. Each one is settled before the stage that uses it produces results, and is not changed afterwards without a reason written here. When Yu states a decision in a session, write it in the last column in Yu's words, with the date.
+
+| # | Decision | Default | Settle before | Yu's decision, date |
+|---|---|---|---|---|
+| 1 | Development year and analysis year | 2017 and 2019 | Stage 1 | "I have chosen 2017 and 2019.", 6 October 2026 |
+| 2 | Flow variable and distance variable | `tradeflow_baci` and `distw_harmonic` | Stage 1 | "defaults OK for the build plan", 14 October 2026 |
+| 3 | Floor on very small flows, `MIN_FLOW`, in thousand USD | none: every recorded flow is kept. In the deviance an error on a tiny flow weighs little next to one on a large flow | Stage 3 | "defaults OK for the build plan", 14 October 2026 |
+| 4 | Draws given to cross-validated selection, `CV_DRAWS` | 50, the same as every other method. Claude's timing of 6 October (section 9) puts this at about 66 minutes on one core | Full run of stage 5 | "defaults OK for the build plan", 14 October 2026 |
+| 5 | Noise of the mechanism check, `NOISE_VAR` | Each training flow multiplied by an independent log-normal factor with mean 1 and variance 1, as in case 3 of Santos Silva and Tenreyro (2006, p. 647). It keeps the expected flow and raises the variance | Stage 6 | "defaults OK for the build plan", 14 October 2026 |
+| 6 | Workers for the long stages, `ADA_JOBS` | 1 | Full run of stage 3 | "defaults OK for the build plan", 14 October 2026 |
+| 7 | Format of figures and tables | Figures as `.pdf`, tables as `.csv` and `.tex` | Stage 7 | "defaults OK for the build plan", 14 October 2026 |
+| 8 | Estimator, target and score | The gravity equation estimated by PPML, every model predicting the flow in levels, scored by Poisson deviance; random forest and boosting with the Poisson loss; CEPII data kept | Stage 3 | "Yes, I agreed with all of your recommendations", 6 October 2026 |
+| 9 | Minimum leaf size of the boosted trees, `GBM_MIN_LEAF` | 20, scikit-learn's default. A stability choice, made on other data before any CEPII run (section 9) | Stage 3 | "defaults OK for the build plan", 14 October 2026 |
+| 10 | The six rows whose colonial indicator CEPII leaves missing on purpose: China with Hong Kong, China with Taiwan, Israel with Palestine, both directions | Dropped, like every row with a missing predictor. They hold about 2.5% of the recorded trade in each year, and China's exports to Hong Kong are the fourth-largest flow (section 3) | Stage 2 | "defaults OK for the build plan", 14 October 2026 |
+| 11 | Largest size run before the checkpoint, `CHECKPOINT_MAX` | 1,000: part 1 of stage 3 runs 50, 100, 200, 500 and 1,000, about 10 minutes on one core (section 9). After the checkpoint, stage 3 runs in full, 2,000 and 5,000 included | Stage 3 | "yes", 18 October 2026 |
+| 12 | Which summary of the draws decides H1, and how the cutoff is read when `ppml` is behind at the smallest sizes | The mean test deviance over draws decides. Beside it, every size reports the median test deviance and the number of draws in which `ppml` beats each ensemble on the same training sample (stage 4 step 1). `find_crossing` reports two more patterns (section 7). `reversal`: the gap changes once, from zero or positive to negative (`ppml` behind at the smallest sizes, ahead after). `reversal_then_crossing`: that change, then one change back from negative to zero or positive at a larger size, reported as `last_crossing` and interpolated in log n as for `one_crossing`. H1 is supported only on `one_crossing`. On `reversal_then_crossing` the paper reports `last_crossing` and the reversal below it, and does not call H1 supported. Alternatives: H1 decided by the paired win counts, with the mean reported as tail risk; or both fixed now as co-primary. Reason: in two reruns by Claude on the 2017 extract on 17 October 2026 (four splits of its own, not the project's; `notes/why-ppml-trails-at-small-n.md`), `ppml` had the lowest median test deviance at every size from 50 to 1,000 and beat the better ensemble in most draws at every size, but at n = 50 one draw in three was worse than predicting the mean flow, and one draw could hold over 80% of the summed deviance. On the mean, both ensembles were ahead at 50 and 100, at least one at 200, and `ppml` at 500 and 1,000 | Part 1 | "yes the average error", 18 October 2026 |
+| 13 | Whether `col_dep_ever`, the colonial-tie flag, stays a predictor | Kept: the eight predictors as fixed on 3 October. Alternative: dropped for all three models, on reasons from the literature and not from any fit (Santos Silva and Tenreyro 2006, p. 651; Head, Mayer and Ries 2010; `notes/colonial-tie-flag.md`). Claude leans slightly towards dropping it. Dropping it gives seven predictors and eight `ppml` coefficients, removes decision 10 (the six rows return: 28,968 usable rows in 2017 and 28,113 in 2019), and changes sections 1, 3 and 6, the proposal and the draft; Claude makes those edits before Phase A continues, Yu tells the TA, and the paper says the question was raised after the 17 October preview, though its reason was available before any model ran | Phase A, stage 2 | "Do not drop let the data tells the story themselves.", 18 October 2026 |
+| 14 | Record the coefficients of `ppml` on every draw | Recorded: in `dev_runs.csv`, on the `ppml` rows only, the intercept and each coefficient, and the number of 1s of each indicator in the training sample (stage 3 step 5). The checkpoint shows their spread by size (report item 9). It changes no fit, and it enters neither H1 nor H2. Alternative: not recorded, in which case the checkpoint cannot show them, since 03b fits nothing | Part 1 | "yes", 18 October 2026 |
+| 15 | A ridge-penalised `ppml` as an extra reference line | Not added. Alternative: `PoissonRegressor` with an L2 penalty on standardised predictors, its strength chosen by 5-fold cross-validation inside each training sample from a grid fixed before part 1, reported beside `mean` and `tree` and outside H1 and H2 (`notes/answers-2026-10-18.md`, section 4). If Yu chooses it, Claude adds it before part 1 to sections 1, 5, 6, 7 and 9, with the new counts of fits and configurations, and it is also scored in stage 5, so that 2019 tests it. Yu may tell the TA, since it adds to what was approved. The checkpoint cannot add it later | Part 1 | |
+| 16 | A rule for thin indicators in `ppml`: drop from each fit any indicator with fewer than k 1s in the training sample | No such rule: only constant columns are dropped (stage 3). Alternative: the rule, with k fixed before part 1, applied to every draw and counted like the constant columns (`notes/answers-2026-10-18.md`, section 3; `notes/colonial-tie-flag.md`, section 5). It is a partial fix: in the preview, steep GDP and distance slopes caused some of the worst draws, and no rule on indicators touches them. Claude does not recommend it. If Yu chooses it, Claude adds it to stage 3 and section 7 before part 1. The checkpoint cannot add it later | Part 1 | "if you don't recommend then no.", 18 October 2026 |
+
+Decisions taken at the checkpoint or at the freeze are added to this table as new rows, in the same form, with the commit of the files they were based on (`results/checkpoint/inputs/` for the checkpoint, `results/size_rule.csv` for the freeze).
+
+Why the defaults: both 2017 and 2019 leave over 28,000 usable rows, so a training size of 5,000 stays under a quarter of the training pool (about 21,700 rows in 2017 and 21,100 in 2019 after the test split). 2020 leaves 25,843 and is the last year with flows.
+
+Why 20 for decision 9: in Claude's test of 6 October 2026 on the Gravity for Undergrads data (2019, positive flows), Poisson boosting with `min_samples_leaf=1` diverged at n = 5,000 (test deviance about 1e93 at depth 3 and 1e36 at depth 5), and with 5 it reached about 30 times the deviance of the leaf-20 fits at depths 3 and 5. With 20 it stayed stable at every size and depth tried. The cause is Newton steps on the log scale fitted to leaves that hold one or a few extreme flows.
+
+## 3. The data: facts checked on the file
+
+Claude checked these on 3 October 2026 on Yu's copy of the file, read-only. They are acceptance checks. If the code prints a different number, stop and report both.
+
+Source
+- CEPII Gravity database, version V202211. Page: https://www.cepii.fr/CEPII/en/bdd_modele/bdd_modele_item.asp?id=8
+- CSV download: https://www.cepii.fr/DATA_DOWNLOAD/gravity/data/Gravity_csv_V202211.zip
+- Documentation: https://www.cepii.fr/DATA_DOWNLOAD/gravity/doc/Gravity_documentation.pdf
+- Licence stated on the page: Etalab 2.0. Citation asked for there: Conte, M., P. Cotterlaz and T. Mayer (2022), "The CEPII Gravity database". CEPII Working Paper N°2022-05, July 2022.
+
+The file
+- `Gravity_V202211.csv`: 1,251,418,200 bytes. SHA-256: `c5611acb52288c537786dda86f2c3319cdd04cc94e8c9328dde936510a17c739`
+- 4,699,296 rows and 87 columns. Years 1948 to 2021. 63,504 rows in every year: 252 times 252 country identifiers, a country paired with itself included.
+- The key of a row is (`year`, `country_id_o`, `country_id_d`). Use `country_id`, not `iso3`: 18 identifiers carry a suffix, for example `DEU.1` and `DEU.2`, and share an `iso3`. Read the identifier columns as text.
+- `tradeflow_baci` has values for 1996 to 2020 only, and never holds a zero: a pair with no recorded trade is missing. Its smallest value is 0.001.
+- Units, as given in the variable list of the CEPII documentation (read in full on 4 October 2026): flows and GDP in thousand current USD, distance in kilometres.
+
+The 16 columns kept in the extract: `year`, `country_id_o`, `country_id_d`, `iso3_o`, `iso3_d`, `country_exists_o`, `country_exists_d`, `distw_harmonic`, `contig`, `comlang_off`, `col_dep_ever`, `comcol`, `fta_wto`, `gdp_o`, `gdp_d`, `tradeflow_baci`.
+
+Rows after each cleaning step
+
+| Step | 2017 | 2019 |
+|---|---|---|
+| Rows in the year | 63,504 | 63,504 |
+| Dropped: same origin and destination | 252 | 252 |
+| Dropped: either country does not exist | 8,262 | 8,262 |
+| Left: pairs of distinct existing countries | 54,990 | 54,990 |
+| Dropped: no recorded flow (zeros found: 0) | 23,106 | 23,870 |
+| Left: flow present | 31,884 | 31,120 |
+| Dropped: GDP of either country missing (distance missing: 0) | 2,368 | 2,551 |
+| Left: GDP and distance present | 29,516 | 28,569 |
+| Dropped: any of the five indicators missing | 554 | 462 |
+| Left: usable rows | 28,962 | 28,107 |
+| Unordered pairs among the usable rows | 16,150 | 15,620 |
+| Of which both directions are present | 12,812 | 12,487 |
+| Usable rows with a flow below 1 (under 1,000 USD) | 1,562 | 1,524 |
+
+Claude checked these counts again on 6 October 2026 on `data/gravity_extract.csv`, the output of stage 1: every one matches.
+
+Behind the dropped rows (stage 2 prints these; compare):
+- GDP missing: 21 identifiers in 2017 (`AIA`, `BES`, `CCK`, `COK`, `CXR`, `ERI`, `FLK`, `GIB`, `IOT`, `MSR`, `NFK`, `NIU`, `PCN`, `PRK`, `SHN`, `SPM`, `SSD`, `TKL`, `VEN`, `VGB`, `WLF`) and 23 in 2019 (the same, plus `SXM` and `SYR`). These rows hold 0.34% of the recorded trade in 2017 and 0.26% in 2019.
+- `comlang_off` and `comcol` missing: every remaining row with `CUW`, `ASM`, `GUM` or (2017 only) `SXM` as origin or destination, 548 rows in 2017 and 456 in 2019. `contig` and `fta_wto` are never missing.
+- `col_dep_ever` missing: `CHN`-`HKG`, `CHN`-`TWN` and `ISR`-`PSE`, both directions, 6 rows in each year (decision 10). The CEPII documentation (section 5.3) sets these ties to missing on purpose. They hold 2.47% of the recorded trade in 2017 and 2.43% in 2019; `CHN` to `HKG` is the fourth-largest flow in both years.
+
+On the usable rows, the natural log of the flow (for display only; no model uses it) has mean 7.535 and standard deviation 4.387 in 2017, mean 7.626 and standard deviation 4.410 in 2019, and minimum -6.908 in both years.
+
+If decision 1 changes, the usable rows of other years are: 26,441 (2010), 27,005 (2011), 26,906 (2012), 27,165 (2013), 25,404 (2014), 25,548 (2015), 24,353 (2016), 29,012 (2018), 25,843 (2020). No flow variable has a value in 2021.
+
+## 4. The repository to build
+
+```
+CLAUDE.md
+README.md
+requirements.txt
+docs/build_plan.md        this file
+docs/tools_log.md         one line per session, for the appendix of the paper
+code/helpers.py
+code/run_all.py
+code/01_get_data.ipynb    writes data/gravity_extract.csv
+code/02_clean.ipynb       writes data/gravity_clean.csv, results/cleaning_log.csv
+code/03_development.ipynb writes results/dev_runs.csv, results/dev_components.csv
+code/03b_checkpoint.ipynb run at the checkpoint (and in quick mode); writes results/checkpoint/
+code/04_size_rule.ipynb   writes results/size_rule.csv, results/gaps.csv, results/cutoff.csv
+code/05_analysis.ipynb    writes results/analysis_runs.csv, results/analysis_summary.csv, results/analysis_cutoff.csv, results/selection_confusion.csv
+code/06_checks.ipynb      writes results/check_runs.csv, results/check_components.csv, results/check_cutoff.csv
+code/07_figures.ipynb     writes everything in figures/
+data/README.md            source, licence, cleaning log
+data/raw/                 the CEPII zip and CSV, ignored by git
+results/README.md         one line per file
+figures/README.md
+```
+
+The repository today has stage 1 filled (pull request #3), `02_clean.ipynb`, `03_model.ipynb` and `04_figures.ipynb` as empty placeholders, a `helpers.py` with `ROOT`, `DATA`, `RAW`, `FIGURES`, `SEED`, `DEV_YEAR` and `ANALYSIS_YEAR`, and a `run_all.py` that runs stages 2 to 4. It has no `CLAUDE.md` and no `docs/` yet.
+
+## 5. Plumbing (Phase A, one pull request)
+
+0. Add this file as `docs/build_plan.md`, and add `CLAUDE.md`. If the 3 October draft of `CLAUDE.md` is not at hand, ask Yu for it before the pull request.
+1. Rename with `git mv`: `03_model.ipynb` to `03_development.ipynb`, `04_figures.ipynb` to `07_figures.ipynb`. Add placeholders for stages 4, 5 and 6 in the style of the existing ones: title, reads, writes, attribution line, one cell that imports from `helpers`. No analysis code.
+2. `code/helpers.py`: keep what is there. Add the one-thread settings at the top, `RESULTS`, the quick-mode switch, the parameters below, and `rng` and `seed_int` (section 7). In `code/01_get_data.ipynb`, move `from helpers import ...` to the top of the first code cell, above `import pandas as pd`, since `helpers.py` will stop if numpy is already imported. Change nothing else in stage 1.
+3. `code/run_all.py`: the six stages 2 to 7 in order, `--download` as now, `--only <notebook>` to run one stage, `--part 1` to run stage 3 alone with `ADA_PART=1` and no other stage (it cannot be combined with `--only` or `--download`), and the minutes each stage took printed at the end. It passes `OMP_NUM_THREADS`, `OPENBLAS_NUM_THREADS` and `MKL_NUM_THREADS` set to 1 to nbconvert (section 7). `03b_checkpoint.ipynb` is not in the default order of a full run. In quick mode, `run_all.py` runs it right after stage 3, after copying the rows of the sizes up to `CHECKPOINT_MAX` into `results_quick/checkpoint/inputs/`, so CI runs it on every push. Until stage 3 writes its two files and `03b_checkpoint.ipynb` exists (step 2 of section 10), `run_all.py` skips the copy and 03b and prints that it did.
+4. `.github/workflows/ci.yml`: set `ADA_QUICK: "1"` in the environment of the run step. Keep the 30-minute limit.
+5. `.gitignore`: add `results_quick/` and `figures_quick/` (`data/raw/` is already there).
+6. `README.md` and `figures/README.md`: the seven stages and their files, and one line for `03b_checkpoint.ipynb`: when it was run and why it is not in the default order of a full run. Add `results/README.md`. Leave every TODO that needs a result or a measured time.
+7. Start `docs/tools_log.md`. First line: `CLAUDE.md` and `docs/build_plan.md` were drafted with Claude in a claude.ai chat on 3 October 2026, asked for as instructions for Claude Code, and the plan was revised with Claude on 6, 14, 17 and 18 October 2026 (the 17 October revision added the checkpoint and the freeze, and the 18 October revision added decisions 13 to 16). Claude's checkpoint report and the changes it proposed are one line of the log. Ask Yu what to list for earlier work.
+
+Parameters in `helpers.py`
+
+| Name | Full run | Quick mode (`ADA_QUICK=1`) |
+|---|---|---|
+| `DEV_YEAR`, `ANALYSIS_YEAR` | 2017, 2019 | same |
+| `TEST_SHARE` | 0.25 of unordered pairs | same |
+| `SIZES` | 50, 100, 200, 500, 1000, 2000, 5000 | 50, 200, 1000 |
+| `CHECKPOINT_MAX` | 1000 (decision 11) | 200 |
+| `PART` | from `ADA_PART`: `1` runs the sizes up to `CHECKPOINT_MAX`, unset all. Only `03_development.ipynb` reads it, and its first output line names the part and the sizes it will run. Every other notebook stops with a message if `ADA_PART` is set | same |
+| `DRAWS` | 50 | 4 |
+| `RF_TREES` | 100 | 20 |
+| `RF_MAX_FEATURES`, `RF_MIN_LEAF` | (1.0, 3), (1, 5, 20) | same |
+| `GBM_MAX_TREES`, `GBM_TREE_COUNTS` | 500, (25, 50, 100, 200, 300, 400, 500) | 100, (25, 50, 100) |
+| `GBM_DEPTHS`, `GBM_LEARNING_RATE`, `GBM_MIN_LEAF` | (1, 2, 3, 5), 0.1, 20 | same |
+| `CV_FOLDS`, `CV_DRAWS` | 5, 50 | 5, 2 |
+| `BOOTSTRAP` | 1000 | 50 |
+| `MIN_FLOW` | None | same |
+| `NOISE_VAR` | 1.0 | same |
+| `N_JOBS` | from `ADA_JOBS`, default 1 | same |
+| `RESULTS`, `FIGURES` | `results/`, `figures/` | `results_quick/`, `figures_quick/` |
+
+Quick mode exists to test that the code runs. Its notebooks print a line saying so. Nothing it writes is evidence.
+
+Packages: draws are spread over workers with `concurrent.futures` from the standard library (section 7), so stages 3 to 6 need no package outside `requirements.txt`. `jinja2` is installed in the workspace as a dependency of nbconvert but is not in `requirements.txt`. Before calling `DataFrame.to_latex` (stage 7), ask Yu for the version `pip list` shows in Nuvolos and add the line.
+
+## 6. Stage by stage
+
+### Stage 1: `01_get_data.ipynb` (Phase A)
+
+Reads the CEPII zip, or `data/raw/Gravity_V202211.csv` if it is already there. Writes `data/gravity_extract.csv`.
+
+1. If the CSV is not in `data/raw/`, download the zip there with `urllib.request`, list its members, and extract the one whose name ends with `Gravity_V202211.csv`. Do not assume its folder inside the zip. Print the URL and the date.
+2. Print the size and the SHA-256 of the CSV and compare them with section 3.
+3. Read the CSV in chunks with `usecols` set to the 16 columns. Count every row on the way. Keep the rows of the two years.
+4. Check: 4,699,296 rows read, 63,504 rows kept per year, 16 columns, no duplicate key.
+5. Save the extract and print its size (about 8 MB). The extract is committed. `data/raw/` is not.
+6. Fill `data/README.md`: source, URL, download date, licence, citation, the columns kept.
+
+Stop if the download fails: some environments block cepii.fr. Do not use another source and do not build a stand-in file. Ask Yu to run this stage in Nuvolos, or to put Yu's copy in `data/raw/`, and to commit the extract.
+
+### Stage 2: `02_clean.ipynb` (Phase A)
+
+Reads `data/gravity_extract.csv`. Writes `data/gravity_clean.csv` and `results/cleaning_log.csv`.
+
+Each step prints the rows before, dropped and left, per year, and adds a line to the cleaning log.
+
+1. Drop rows where origin and destination are the same.
+2. Drop rows where `country_exists_o` or `country_exists_d` is not 1.
+3. Drop rows where `tradeflow_baci` is missing. Print how many of the remaining flows are zero or negative (expected: none). If `MIN_FLOW` is set, drop the flows below it as a separate step.
+4. Drop rows where `gdp_o`, `gdp_d` or `distw_harmonic` is missing. Print the count per variable and the countries whose GDP is missing.
+5. Drop rows where any of the five indicators is missing (decision 10). Print the count per indicator and the countries concerned.
+6. Check that every indicator holds only 0 and 1, and store it as an integer.
+7. Add `ln_gdp_o`, `ln_gdp_d`, `ln_dist` as natural logs. Check that all three are finite. The flow stays in levels.
+8. Check that no key appears twice.
+9. Add `pair_id`: the two identifiers sorted and joined with `|`. Print the number of unordered pairs and how many have both directions.
+10. Save 13 columns: `year`, `country_id_o`, `country_id_d`, `pair_id`, `tradeflow_baci` and the eight predictors.
+11. First look, shown in the notebook and not saved: the first rows, summary statistics per year, the share of each indicator, missing values per column of the extract, the share of the total flow held by the largest 1% and the largest 10% of rows, and a histogram of the log of the flow (for display; the log is not saved).
+
+Every count and share in section 3 has to equal what the notebook prints, so it also prints, per year: the share of the recorded trade held by the rows dropped in step 4 and by the six rows of decision 10, the number of usable rows with a flow below 1, and the mean, standard deviation and minimum of the log of the flow. Then complete the cleaning log in `data/README.md` from what the notebook printed. `data/gravity_clean.csv` and `results/cleaning_log.csv` are committed, so that later stages can be run on their own.
+
+Allowed in Phase A only if Yu asks for it: one fit of `ppml` on the cleaned development-year table as a first look, under its own heading at the end of this notebook, with the coefficients, the mean deviance, D squared, and the check that the predicted flows sum to the observed total, printed. It feeds no later stage. If Yu asks for it, it runs after decision 13 is answered, so that the decision on the flag rests on no fit.
+
+### Stage 3: `03_development.ipynb` (after sign-off), part 1 and then in full
+
+Reads `data/gravity_clean.csv`, and in the full run the files of the last run of part 1 (below). Writes `results/dev_runs.csv` and `results/dev_components.csv`, with `variant` = `base`.
+
+Part 1 (`ADA_PART=1`) runs the sizes up to `CHECKPOINT_MAX` and writes both files. After the checkpoint, stage 3 is run in full (`ADA_PART` unset) with the grid, sizes and `GBM_MIN_LEAF` the checkpoint fixed, and overwrites both files. Every draw is keyed by year, split, size and draw (section 7). So the rows of the part-1 sizes must equal those of the last run of part 1 (`results/checkpoint/inputs/`, or `results/checkpoint/rerun/inputs/` if the checkpoint called for a rerun) apart from the seconds, within a relative difference of 1e-9: the full run checks part 1 at no extra cost. It prints the largest relative difference over the rows and columns the two files share, and stops if it is above 1e-9. Quick mode compares nothing.
+
+1. Keep the development year. Split it with `split_pairs(table, year, split_id=0)`: a random quarter of the `pair_id` values is the test set with all its rows, the rest is the training pool. Both directions of a pair land on the same side. Print rows and pairs on each side.
+2. Check that the largest size is at most a quarter of the pool. If not, stop and report. Do not shrink it silently.
+3. Time one draw at the largest size this run uses (in part 1 and in quick mode too) and print the projected minutes of the stage. The notebook does not wait for an answer. Before Yu starts the full run in Nuvolos, Claude reads the projection of checkpoint item 8 and asks Yu if it is over 30 minutes.
+4. For every size n and every draw: sample n pool rows without replacement, fit the 13 models on that one sample, predict the test rows for the 37 configurations (`run_draw`, section 7).
+5. For every configuration on every draw, write one row to `dev_runs.csv`: test deviance, D squared, MAE and RMSE each divided by the mean test flow, the mean Poisson deviance on its own training sample (in-sample for `ppml`, `gbm` and `mean`, with one `staged_predict` pass per `gbm` depth scored at the counts of `GBM_TREE_COUNTS`; out-of-bag for `rf`, fitted with `oob_score=True`, which leaves its predictions unchanged, and scored on `oob_prediction_` over the training rows where it is positive (scikit-learn leaves it at 0 for a row that no tree left out, which can happen with the 20 trees of quick mode, and `mean_poisson_deviance` stops on a 0); not recorded for `tree`, whose training deviance is 0 by construction), the unit deviance summed over each of three groups of test rows and divided by the number of test rows (the largest 1% of test flows, the next 9% and the rest; the groups are fixed once from the test flows of the split, the same rows for every model, and the three columns add up to the test deviance), the largest test prediction divided by the largest training flow, the seconds of the fit it came from, how many indicator columns were constant in the training sample, and for `ppml` whether scikit-learn warned that it fell back from Newton-Cholesky to L-BFGS. On the `ppml` rows only (decision 14): the intercept (`coef_intercept`) and the coefficient of each predictor (`coef_` and the predictor's column name, for example `coef_ln_dist`; empty where the column was dropped), and the number of 1s of each indicator in the training sample (`ones_` and its name, for example `ones_contig`, filled for a dropped column too). These columns are empty for every other model. For a `gbm` configuration the seconds are those of the one fit, with the maximum number of trees, at its depth.
+6. Predictions are not saved. Per size and configuration, keep the running sum of the predictions and the running sum of their natural logs for every test row. Every prediction is positive (all flows are positive and every model predicts through a mean or an exponential), so the log is defined; assert it.
+7. After the last draw of a size, compute the components (`split_error`, section 7) and write one row per size and configuration to `dev_components.csv`.
+
+At small sizes an indicator can be constant in the training sample. `PoissonRegressor(alpha=0)` needs a design matrix of full rank, so drop the constant columns from that one `ppml` fit (their coefficient is in effect zero) and record how many. No other column is dropped unless Yu chooses decision 16. If the remaining columns are collinear, scikit-learn warns and falls back to L-BFGS: record it, do not repair it. In Claude's test on the Gravity for Undergrads data (20 fits per size), 1 fit fell back at n = 50 and none at 100, 200, 500, 1,000 or 5,000.
+
+### Checkpoint, between part 1 and the full run of stage 3
+
+Yu asked on 17 October 2026 for a pause "to think how to estimate the intermediate result and adjust or tune the execution plan" before the larger training sizes. It sits in the development year because that year is the one open to exploration (section 1): what is changed here is written down and then fixed, and the analysis year has not been read. The development-year n* is therefore exploratory (stage 4 step 5).
+
+`03b_checkpoint.ipynb` reads its inputs from `results/checkpoint/inputs/` and writes `results/checkpoint/`: one `.csv` per report item, and the learning curves as `results/checkpoint/learning_curves.pdf`. `run_all.py` runs it only in quick mode. Once Yu has run part 1 in Nuvolos and committed the two files, they are copied unchanged into `results/checkpoint/inputs/`, committed, and never overwritten. 03b fits nothing, so Claude Code runs it on those inputs and opens a pull request with `results/checkpoint/`. Claude then posts in the plan thread the figure, the tables of items 2 to 4 and 9, the flags of items 5 and 7, the projected times, and the changes the rules below call for. Its computations are functions in `helpers.py` that stages 4, 5 and 7 reuse, so the checkpoint and the final tables cannot disagree on the same sizes.
+
+The report, for every size up to `CHECKPOINT_MAX`:
+
+1. Learning curves: the mean test deviance of `ppml`, tuned `rf`, tuned `gbm`, `mean` and `tree`, with bands of two standard errors, and their mean training deviance as dashed lines, training size and deviance on log axes. The dashed line is in-sample for `ppml`, `gbm` and `mean`, out-of-bag for `rf`, and absent for `tree`. It follows the tuned setting at each size, so it can jump where that setting changes. The space between a model's two lines is its optimism: how much better it fits its own sample than new pairs. For `rf` this is understated, because the other direction of a pair can be in the training sample.
+2. Scores: for the same five lines, the mean test deviance with its standard error, the median test deviance, the largest draw and the share of the mean that comes from it, D squared (mean and median over draws), and MAE and RMSE each divided by the mean test flow (section 1). Where one draw holds more than half of a mean, its standard error is marked unreliable. The mean deviance is the score that decides. The rest is there to be read, and D squared is the easiest to read: the share of the deviance of predicting the mean flow that the model removes.
+3. Selection at the middle point: the model the size rule would pick at each size (lowest mean test deviance among `ppml`, tuned `rf` and tuned `gbm`) against the model with the lowest test deviance on each draw, counted over draws. Tuned means the per-size setting of stage 4 step 2, never the best setting of each draw. At one size this is a single row, because the rule picks one model per size; pooled over sizes it is a 3x3 table. Next to it: the share of draws picked right, the share that always picking the most frequent winner of that size would get, the mean regret (the pick's test deviance minus the lowest of the three on the same draw), and in how many draws `ppml` beats the ensemble of the `best` comparison. The same `helpers.py` function makes `selection_confusion.csv` in stage 5. In the development year the pick and the winner are read on the same test set, so these numbers are optimistic. They preview H2, which is tested only in the analysis year. No confusion matrix of the flows is shown: the models predict dollars, and cutting flows into classes would score something other than the deviance that decides.
+4. Gaps: the error gap, bias gap and variance gap of stage 4 for `ppml` against tuned `rf`, against tuned `gbm` and against the better of the two (`best`, as in stage 4), with the paired standard error of the error gap, and `find_crossing` on the sizes so far, labelled provisional.
+5. Tuned settings: for every size, the tuned setting of `rf` and of `gbm`, flagged where it sits at an edge of its grid (as defined under Grid edges below).
+6. Where the error comes from: for each model, the three group columns of stage 3 step 5 averaged over draws, which add up to its mean test deviance and can be compared across models, and each group's share of that total.
+7. Health: that every test deviance in the inputs is finite (stage 3 asserts that every prediction is positive and finite, and writes no file if one is not), the identities of section 8, the constant indicator columns and L-BFGS fallbacks of `ppml`, and, for every model, the draws whose test deviance is above that of `mean` on the same sample, with the largest test prediction divided by the largest training flow.
+8. Time: seconds per draw by size, summed over the 13 fits of a draw (each `gbm` depth counted once, not once per tree count). Part 1 does not run the sizes above `CHECKPOINT_MAX`, so the projected minutes of the full run of stage 3 and of stages 5 and 6 scale the seconds measured at `CHECKPOINT_MAX` by the ratios of section 9 (2,000 interpolated linearly between 1,000 and 5,000), labelled as projections. The timing draw of the full run (stage 3 step 3) replaces them.
+9. Coefficients of `ppml` (decision 14): by size, the median, the 10th and 90th percentiles and the range of the intercept and of each coefficient over the draws where it was estimated, with the number of draws where its column was dropped beside it, and for each indicator the number of draws in which it had one to three 1s. This item is read, not acted on: no rule below uses it.
+
+What the checkpoint may change, each only by the rule given here, each written as a new row of section 2 with Yu's words and the date:
+
+- Grid edges, one round only, read on the first run of part 1. A tuned setting is at an edge when one of its values is the first or last of that setting's grid, and its mean test deviance is lower than that of the configuration with the next value inside that grid, the model's other setting held at its tuned value, by more than twice the paired standard error. A tie is never an edge. The steps beyond each edge are fixed now: `rf` `min_samples_leaf` 50; `rf` `max_features` 2 (the integer: two of the eight predictors; the grid's 1.0 means all eight); `gbm` 10 trees below 25 (staged, no extra fit); `gbm` 750 and 1,000 trees above 500, with `GBM_MAX_TREES` 1,000 (about twice the boosting time, shown in item 8); `gbm` depth 7. `rf` `max_features` 1.0, `rf` `min_samples_leaf` 1 and `gbm` depth 1 cannot be extended and are reported as such. All extensions are applied together and part 1 is run again once. The two files of the rerun are copied into `results/checkpoint/rerun/inputs/`, and `03b_checkpoint.ipynb` is run on them with `ADA_CHECKPOINT=rerun` set, which makes it read from there and write into `results/checkpoint/rerun/`. That report is read for item 7 only. A setting at a new edge, or a new flag, on the rerun changes nothing more: it is reported in the paper as a limit of the grid. Edges at 2,000 and 5,000 are reported, not extended (stage 6 `trees2x`). The counts of section 1 and stage 5 follow the grid: the code derives them from the parameters in `helpers.py`, and the decision row states the new counts.
+- Stability. A `gbm` configuration on a draw whose test deviance is more than ten times that of `mean` on the same sample, or whose largest test prediction is more than 1,000 times the largest training flow, is a divergence as in decision 9 (there it reached 1e36 and more). Any such draw raises `GBM_MIN_LEAF` from 20 to 50 for every size, and part 1 is run again. At n = 50 a leaf of 50 allows no split, so `gbm` there predicts the mean training flow; the report says so. The same test is run on the sizes above `CHECKPOINT_MAX` after the full run, before stage 4. A divergence there raises `GBM_MIN_LEAF` the same way, and stage 3 is run again in full. `ppml` draws flagged in item 7 change nothing: they are part of the result.
+- Sizes. If the provisional `best` comparison shows `one_crossing` (or `reversal_then_crossing`, decision 12) with its n* between two sizes run so far, one size is added at the geometric mean of those two sizes, rounded to the nearest 10 (70, 140, 320 or 710). It is run with part 1 and joins `SIZES` for stages 3, 5 and 6, so H2 is tested at it too. Any other pattern adds no size. `never_ahead` adds nothing below 50, because the signed-off proposal fixes the range at 50 to 5,000. No size above 5,000 is added: extending the curve until an ensemble wins would be optional stopping. The curves are not extrapolated beyond `CHECKPOINT_MAX`: the full run measures them.
+- Workers. `ADA_JOBS` is set from the projected time. Results do not depend on it.
+- Bugs. A fix for a bug found at the checkpoint is always allowed. It goes into section 2 with its pull request, and part 1 is run again.
+- Reporting. Scores, tables or figures may be added to stages 4 and 7. The paper labels them as added at the checkpoint, and none of them enters H1 or H2.
+
+What it may not change: the score, the predictors and the columns `ppml` drops (decisions 13 and 16), the set of models and reference lines (decision 15), the cleaning, the test split, the years, the number of draws, H1 and H2 as section 1 and decision 12 state them, the two-standard-error rule of H2, `find_crossing` and the patterns it reports (decision 12), and `SIZES` except through the Sizes rule. No size or model is dropped because of which model is ahead. Nothing in the analysis year is read.
+
+Claude prepares the report and applies the rules as written. Yu confirms each change. A rule that fires is applied unless Yu writes, in section 2, a reason that does not concern which model is ahead, such as running time. The full run of stage 3 starts after the changes are in section 2 and any rerun of part 1 they call for is done. All the changes go into one rerun, handled as under Grid edges.
+
+The implementation section of the paper (outside this plan) reports the checkpoint in a short paragraph and one table: the sizes run before it, the report items looked at, each change made with the rule that called for it and its section 2 row, the changes Yu declined, and that 2019 was first read after the freeze.
+
+### Stage 4: `04_size_rule.ipynb` (after sign-off)
+
+Reads the two files of stage 3. Writes `results/size_rule.csv`, `results/gaps.csv` and `results/cutoff.csv`.
+
+1. Mean test deviance and its standard error (standard deviation over draws divided by the square root of the number of draws) for every size and configuration, with the median test deviance beside it. For `ppml` against tuned `rf`, tuned `gbm` and the `best` ensemble, the number of draws in which `ppml` has the lower test deviance on the same training sample (decision 12).
+2. Tuning: for `rf` and for `gbm`, the tuned configuration at a size is the one with the lowest mean test deviance at that size. A tie (identical predictions, as for every `gbm` depth at n = 50, where `min_samples_leaf` 20 allows one split) goes to the simpler setting: for `gbm` the smaller depth, then fewer trees; for `rf` the larger `min_samples_leaf`, then fewer `max_features` (3 before 1.0, which means all eight).
+3. Size rule: at each size, the chosen model is the one with the lowest mean test deviance among `ppml`, tuned `rf` and tuned `gbm`. `size_rule.csv` has three rows per size: the model, its tuned settings, its mean and standard error, and whether it is the chosen one.
+4. Gaps, for three comparisons at each size: `ppml` against tuned `rf`, against tuned `gbm`, and against the better of the two (`best`).
+   - error gap = E(ppml) - E(c)
+   - bias gap = B(ppml) - B(c), variance gap = V(c) - V(ppml), where V is the variance and B the remainder of section 7, computed for each of its three versions (raw, r and rn), all three saved
+   - check: error gap = bias gap - variance gap
+   - standard error of the error gap, paired over draws
+   - whether `ppml` is within two standard errors of the ensemble (error gap at most twice its standard error)
+5. Cutoff: `find_crossing(sizes, error gap)` for each comparison (section 7). The `best` comparison gives the development-year n*. It is exploratory: the ensembles are tuned on this test set, which favours them and moves n* down, and the checkpoint may have changed the design after part 1 was seen. The test of H1 is `analysis_cutoff.csv` (stage 5), whose settings were fixed before the analysis year was read.
+6. Interval: resample the draws with replacement `BOOTSTRAP` times, separately at each size, with the same resampled draws for every configuration. Inside each resample redo step 2, the error gap of step 4, and step 5. The bias and variance gaps are not resampled: they need each draw's predictions, which are not saved. Report the 2.5 and 97.5 percentiles of n* over the resamples that have one crossing, and the share of resamples in each pattern.
+7. Freeze. Stage 4 ends with the second pause: Claude posts the tuned settings, the size rule and n* of the development year, and Yu confirms them. From then on nothing is tuned, and stage 5 reads the analysis year for the first time.
+
+Every standard error and interval in this project describes variation over training draws from one pool, scored on one test set. The draws overlap, more so at large sizes. Say this wherever such a number is shown.
+
+### Stage 5: `05_analysis.ipynb` (after sign-off)
+
+Reads `data/gravity_clean.csv` and `results/size_rule.csv`. Writes `results/analysis_runs.csv`, `results/analysis_summary.csv`, `results/analysis_cutoff.csv` and `results/selection_confusion.csv`.
+
+Keep the analysis year and split it the same way (its own test set), with the same check on the largest size. Time one draw at the largest size first and ask Yu about `CV_DRAWS` if the projection is long: this number is fixed before any error of this stage is looked at. For every size and draw, on one training sample:
+
+1. `ppml`, `rf` and `gbm`: one fit each at the settings `size_rule.csv` gives for that size. For `gbm` the number of trees fitted is the tuned number. Record test deviance, D squared, MAE and RMSE divided by the mean test flow, seconds, 1 fit.
+2. `size_rule`: the row of the chosen model, copied. Its cost is that one fit.
+3. `best_of_three`: the lowest test deviance of the three. It looks at the test set, so it is a reference and not a selector.
+4. `cv_select`, for the first `CV_DRAWS` draws: 5-fold cross-validation on the training sample over the 35 candidate configurations (per fold: 1 `ppml` fit, 6 `rf` fits, 4 `gbm` fits with staged predictions on the validation fold), each scored by its mean Poisson deviance on the validation fold. Take the configuration with the lowest mean validation deviance, refit it on the whole sample, score it on the test set. Its cost is every fit from the first fold to the refit: 56 fits, and their seconds.
+
+`analysis_summary.csv`, per size: mean, standard error and median of the test deviance of each method, and the number of draws in which `ppml` beats `rf`, `gbm` and the better of the two on the same training sample (decision 12); the paired difference `size_rule` minus `cv_select` over the draws that have both, with its standard error and whether the mean difference is at most twice the standard error (this is the test of H2); the paired difference `size_rule` minus `best_of_three`; mean seconds and fits per method.
+
+`analysis_cutoff.csv`: `find_crossing` on E(ppml) minus the lower of E(rf) and E(gbm) at the fixed settings, with the same bootstrap over draws and no tuning. This is the test of H1 (section 1), read with decision 12.
+
+`selection_confusion.csv`: on the draws that have both selectors (the first `CV_DRAWS` of each size), a table of the model each selector picked (for `cv_select`, the model of its chosen configuration, whatever its setting) against the model `best_of_three` found best on that draw (ties go to the first of `ppml`, `rf`, `gbm`). `size_rule` picks one model per size, so at one size its table is one row; the 3x3 table is pooled over sizes. Report, per size and pooled, the share picked right, the share that always picking the most frequent winner of that size would get (no selector that picks one model per size can do better), and the mean and paired standard error of the selector's test deviance minus that of `best_of_three`. For `cv_select` this difference can be negative, because its configuration need not be one of the three fixed settings, so it is called the difference, not the regret. The share picked right is descriptive: H2 is read on the deviance alone. This is the one place in the project where a confusion matrix fits: the selectors choose among three classes, while the models themselves predict dollars.
+
+Seconds depend on the machine and on the number of workers. The number of fits does not. Report both.
+
+### Stage 6: `06_checks.ipynb` (after sign-off)
+
+Reads `data/gravity_clean.csv` and the files of stages 3 and 4. Writes `results/check_runs.csv`, `results/check_components.csv` and `results/check_cutoff.csv`. Three variants, all on the development year, each using the functions of stages 3 and 4.
+
+- `noise`: the base experiment with every training flow multiplied by an independent log-normal factor `exp(s*z - s**2/2)`, where `z` is standard normal from `rng("noise", ...)` and `s**2 = ln(1 + NOISE_VAR)` (ln 2 for the default), so the factor has mean 1 and variance `NOISE_VAR` (decision 5). The factor is drawn fresh for every draw. Test targets are untouched. Print the variance gap, the bias gap and n* next to the base values.
+- `split2`: the base experiment with `split_id=1`. Print n* next to the base value.
+- `trees2x`: at the largest size only, on the same samples as the base run: `rf` with twice the trees at its tuned settings, `gbm` with twice the maximum number of trees at its tuned depth, scored at the tuned number of trees, at twice that number and at the new maximum. Print the paired difference to the tuned errors with its standard error.
+
+### Stage 7: `07_figures.ipynb` (after sign-off)
+
+Reads `data/gravity_clean.csv` and `results/`. Writes `figures/`. No model is fitted here.
+
+Tables: `tab_cleaning` (rows after each step, per year), `tab_summary` (summary statistics of the cleaned table, per year), `tab_tuned` (tuned settings and errors by size), `tab_cutoff` (n*, interval and pattern shares for every comparison and variant), `tab_selection` (the H2 table from `analysis_summary.csv`), `tab_selection_confusion` (from `selection_confusion.csv`, over all sizes), `tab_checks`.
+
+Figures, all with training size on a log axis: `learning_curves` (mean test deviance of `ppml`, tuned `rf`, tuned `gbm`, `mean` and `tree`, with bands of two standard errors, and their mean training deviance as dashed lines, defined as in item 1 of the checkpoint, deviance on a log axis), `components` (V and B of the three models), `gaps` (bias gap and variance gap with n* and its interval), `analysis_methods` (the three models at fixed settings, `size_rule`, `cv_select`, `best_of_three`), `noise_gaps` (gaps with and without noise).
+
+Every figure has axis labels with units. Captions are Yu's and go in the paper.
+
+## 7. Functions in `helpers.py`
+
+- `rng(purpose, *keys)`: returns `numpy.random.default_rng([SEED, code of the purpose, *keys])`. Purposes: `split`, `draw`, `model`, `noise`, `cv`, `bootstrap`. Keys are integers such as the year, the split, the size and the draw. `seed_int(purpose, *keys)` draws one integer from it for scikit-learn's `random_state`. The same keys always give the same numbers, so a result does not depend on the order of the loops or on the number of workers.
+- `split_pairs(table, year, split_id)`: sort the distinct `pair_id` values, permute them with `rng("split", year, split_id)`, send the first quarter to the test set.
+- `run_draw(...)`: sample with `rng("draw", year, split_id, n, draw)`, fit the 13 models with `seed_int("model", year, split_id, n, draw)`, return the test predictions of the 37 configurations, their mean Poisson deviance on the training sample (out-of-bag for `rf`, none for `tree`), the largest training flow, the seconds of each fit, and for `ppml` its coefficients, the number of 1s of each indicator in the sample (decision 14), the number of constant indicator columns it dropped, whether it fell back to L-BFGS, and its predicted training total divided by the observed one (section 8). The main process writes the rows of stage 3 step 5 from these. All models of a draw see the same sample. A variant that adds noise or trees uses the same sample as the base run. Every model is fitted on one thread, and the workers are spread over draws only. `helpers.py` begins, before it imports numpy or scikit-learn, by setting `OMP_NUM_THREADS`, `OPENBLAS_NUM_THREADS` and `MKL_NUM_THREADS` to "1" with `os.environ.setdefault`, and it stops with a message if numpy is already imported. Every notebook imports `helpers` in its first code cell, before pandas, numpy or scikit-learn. The forest also gets `n_jobs=1`. Without this, `HistGradientBoostingRegressor`, which has no `n_jobs`, uses every core in each worker, and a worker forked after the main process has fitted it (the timing draw of stage 3 step 3) blocks for ever, because the OpenMP library does not survive a fork. The thread count changes no prediction (Claude's test, 17 October 2026). For `ppml`, drop the indicator columns that are constant in the sample before fitting (stage 3). D squared is `d2_tweedie_score(y_test, pred, power=1)`.
+- Staged prediction: one `gbm` fit with `GBM_MAX_TREES` trees gives the predictions after every count in `GBM_TREE_COUNTS` through `staged_predict`. Claude checked on 6 October 2026, with scikit-learn 1.8.0, that for `HistGradientBoostingRegressor(loss="poisson", early_stopping=False, max_leaf_nodes=None)` these equal the predictions of a model fitted with that many trees and the same `random_state` (difference exactly 0 at depths 1, 2, 3 and 5).
+- `split_error(sum_pred, sum_log_pred, y_test, dev_per_draw, n, pool_rows)`: with R draws, for each test row the arithmetic mean prediction is `am = sum_pred / R` and the geometric mean is `gm = exp(sum_log_pred / R)`. `variance_raw` is the mean over test rows of `2 * (am - gm)`, the average deviance between each draw's prediction and `gm`. `remainder_raw` is the mean over test rows of `d(y, gm)` (noise plus bias). `error` is the mean test deviance over draws, and `error = remainder_raw + variance_raw` holds exactly. Then `variance_r` = `variance_raw` times R/(R-1), `variance_rn` = `variance_r` divided by (1 - n/pool_rows), and each remainder is `error` minus the matching variance. Save all three versions.
+- `find_crossing(sizes, gap)`: `gap` is E(ppml) - E(c) by size. All negative: pattern `never_overtaken`. All zero or positive: `never_ahead`. Exactly one change, from negative to zero or positive: `one_crossing`, with n* interpolated linearly in log n between the two sizes around it. With decision 12, exactly one change, from zero or positive to negative: `reversal`, with no n*; exactly two changes, the first from zero or positive to negative and the second back: `reversal_then_crossing`, with `last_crossing` interpolated at the second change as n* is. Anything else: `several`, with no n*.
+- `size_rule_lookup(table, n)`: the row of the grid size nearest to n on a log scale.
+- Draws run in order when `N_JOBS` is 1, and through `concurrent.futures.ProcessPoolExecutor(max_workers=N_JOBS, mp_context=multiprocessing.get_context("forkserver"))` otherwise, with `run_draw` imported from `helpers.py` so that it can be sent to the workers. Each draw returns its predictions to the main process, which adds them to the running sums in the order of the draws and discards them.
+- Checkpoint and report functions shared by `03b_checkpoint.ipynb` and stages 4, 5 and 7: the summary by size and configuration (mean, standard error, median, largest draw and its share), tuning with its tie-break, the selection table, gaps, edge flags, health flags and the deviance by group of test flows.
+
+## 8. Checks that run every time
+
+All but the last are assertions in the notebooks, so quick mode and the full run both exercise them. The last is run by hand before each pull request.
+
+- No `pair_id` is on both sides of a split.
+- A training sample has n distinct pool rows.
+- Every prediction is positive and finite.
+- `error` = `remainder_raw` + `variance_raw`, to a relative tolerance of 1e-8.
+- error gap = bias gap - variance gap, same tolerance.
+- `find_crossing` on toy input at sizes (50, 100, 200, 500): gaps (-2, -1, 1, 2) give one crossing at 141.42; (2, -1, 1, 2) give `reversal_then_crossing` with `last_crossing` 141.42; (1, -1, -2, -3) give `reversal`; all negative gives `never_overtaken`; all positive gives `never_ahead`; (-1, 1, -1, 1) gives `several`.
+- On the first draw of stage 3, the staged `gbm` prediction at the smallest count equals a fresh fit with that many trees.
+- Printed, not asserted: per size, the largest relative difference between the predicted and the observed training total of `ppml`. It is about 1e-12 unless the fit fell back to L-BFGS (Claude's test: 7e-3 in the one fit that fell back).
+- On one machine, quick mode run twice, and with `ADA_JOBS=1` and `ADA_JOBS=2`, writes identical files apart from the seconds columns.
+
+## 9. Running time
+
+Measured by Claude on 6 October 2026 on one core of a sandbox, with the pinned package versions, on a stand-in of the same size built by resampling positive flows of the Gravity for Undergrads data (2015 to 2023): a pool of 21,700 rows and a test set of 7,240 rows. Not measured in Nuvolos, not on the CEPII data.
+
+- One draw (13 fits, 37 configurations): 2.4 s at n = 50, 2.5 s at n = 1,000, 7.3 s at n = 5,000; 21 s for one draw at each of the seven sizes.
+- One base experiment (7 sizes, 50 draws): about 17.5 minutes.
+- Cross-validated selection (five folds over every configuration, refit not included): 8.9 s per draw at n = 50, 9.5 s at n = 1,000, 28.2 s at n = 5,000; about 66 minutes for 50 draws at every size.
+
+That projects to about 10 minutes for part 1 of stage 3 (sizes 50 to 1,000) and 18 for its full run after the checkpoint, 70 minutes for stage 5 and 40 minutes for stage 6 on one core, a little over two hours in all, and about 35 minutes with four workers. If the checkpoint extends `gbm` to 1,000 trees (Grid edges), the boosting part of each draw takes about twice as long. The 3 October estimate (28 minutes, two hours and one hour) was made for least squares on the log flow and the older gradient boosting, which this plan no longer uses. The time that goes in the README is the one measured in Nuvolos (Requirement 4.24).
+
+## 10. Order of work
+
+Phase A, open now: (1) plumbing, (2) stage 1 and the committed extract, (3) stage 2 and `data/README.md`. Step 2 is done: pull request #3, merged on 6 October 2026, filled `code/01_get_data.ipynb`, committed `data/gravity_extract.csv` (cut from Yu's copy; it reproduces every count of section 3), added `RAW`, `DEV_YEAR` and `ANALYSIS_YEAR` to `helpers.py` and `data/raw/` to `.gitignore`, and filled `data/README.md` except the cleaning log.
+
+Phase B. Yu reported the sign-off in the plan thread on 17 October 2026 ("TA has signed up") and will add its date in the Status block. The order from here:
+
+0. Yu sets "Proposal sent" and "Sign-off received" to yes in section 0 (the date can follow) and writes under "Changes asked for at sign-off" what the TA asked for, "none" included. If the TA took up the fallback Yu offered (least squares on the log of the flow, `plan/ta_talk.md`), sections 1 and 6 are revised with Yu before any stage 3 code is written. Yu also answers decisions 11 to 16 and says go. Decision 13 comes first, because dropping the flag changes stage 2: step 1 starts once it is answered and Yu has said go. Decisions 11, 12 and 14 to 16 change the code of stage 3 and 03b, so they are best answered before step 2, and must be answered before step 3 (part 1) at the latest.
+1. Phase A, still to do, one pull request: section 5 (item 0 included) and stage 2.
+2. Stage 3 with `--part 1`, and `03b_checkpoint.ipynb`, one pull request with a quick-mode run that passes, 03b included.
+3. Part 1. Yu runs it in Nuvolos from a terminal with `python code/run_all.py --part 1` and commits the two files, which are the record. Opened in JupyterLab, the notebook has no `ADA_PART` and runs every size. A cloud run by Claude, with Python 3.12 as in Nuvolos and CI, is optional and only a preview. It is compared with Yu's files number by number, leaving out the seconds: every score and component within a relative difference of 1e-9, and the same tuned settings, selection tables and patterns. Another processor can take other vectorised paths in numpy and OpenBLAS, so the files are not expected to match to the last digit. A larger difference is reported at the checkpoint and its cause found before the full run. The Nuvolos files decide.
+4. The checkpoint: Claude copies the two files into `results/checkpoint/inputs/`, runs 03b, opens its pull request and posts the report in the plan thread. Yu confirms the changes the rules call for, they go into section 2, and any rerun of part 1 they call for is made (one round).
+5. Stage 3 in full, run by Yu in Nuvolos.
+6. Stage 4, ending with the freeze.
+7. Stages 5, 6 and 7, one pull request each. Yu runs each full stage in Nuvolos and commits its output.
+
+## 11. Outside this plan
+
+- The text of the paper, the proposal and the recording.
+- Gaussian process regression, which the course teaches on 16 November. It may be added afterwards if Yu asks, on small training sizes only, as a fourth model with its own stage.
+- Any other year, data set or model.
+- Nonlinear least squares (NLS) as an estimator check before PPML: proposed by Claude on 14 October 2026 (`plan/nls_check.md`) and dropped by Yu the same day ("drop the NLS idea").
