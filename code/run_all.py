@@ -2,7 +2,7 @@
 # stage notebooks in order, each one in a fresh kernel. Later asked for (18
 # October 2026, section 5 of docs/build_plan.md): the seven stages, running
 # one stage alone, part 1 of stage 3 before the checkpoint, one thread per
-# model, and the minutes each stage took.
+# model, the minutes each stage took, and what each notebook prints.
 """Run the project from start to finish (Requirements 4.7 and 4.8).
 
 From the repository folder:
@@ -10,7 +10,8 @@ From the repository folder:
     python code/run_all.py                           stages 2 to 7, from the data in data/
     python code/run_all.py --download                stage 1 first, then stages 2 to 7
     python code/run_all.py --only 02_clean.ipynb     one stage only
-    python code/run_all.py --part 1                  part 1 of stage 3 only (sizes up to CHECKPOINT_MAX)
+    python code/run_all.py --part 1                  part 1 of stage 3 only (sizes up to CHECKPOINT_MAX);
+                                                     the checkpoint is run afterwards, on its own
 
     ADA_QUICK=1 python code/run_all.py               quick test that the code runs
     ADA_JOBS=4 python code/run_all.py                four workers for the long stages
@@ -18,12 +19,14 @@ From the repository folder:
 Each notebook is executed top to bottom in a newly started kernel. The run
 stops at the first error. The notebooks themselves are not modified: what a
 run produces is whatever the notebooks save in data/, results/ and figures/.
+What each notebook prints is shown here once the notebook has finished.
 
 03b_checkpoint.ipynb is not in the order of a full run: it is run once, at
 the checkpoint between part 1 and the full run of stage 3 (section 6 of the
 build plan). In quick mode it runs right after stage 3, so that every push
 tests it.
 """
+import json
 import os
 import subprocess
 import sys
@@ -86,7 +89,17 @@ def run_notebook(name, scratch, environment):
         check=True,
         env=environment,
     )
+    print_outputs(Path(scratch) / name)
     return (time.perf_counter() - start) / 60
+
+
+def print_outputs(executed):
+    """Print what the executed notebook printed: nbconvert itself shows none of it."""
+    notebook = json.loads(executed.read_text(encoding="utf-8"))
+    for cell in notebook["cells"]:
+        for output in cell.get("outputs", []):
+            if output["output_type"] == "stream":
+                print("".join(output["text"]), end="", flush=True)
 
 
 def copy_checkpoint_inputs():
@@ -129,9 +142,14 @@ def read_arguments(arguments):
 
 def main():
     stages, part = read_arguments(sys.argv[1:])
+    # run_all.py sets ADA_PART itself, so that part 1 is always asked for in the same way.
+    if part is None and "ADA_PART" in os.environ:
+        sys.exit("ADA_PART is set in this shell, but run_all.py sets it itself. Run part 1 with: "
+                 "python code/run_all.py --part 1. To run every size, unset ADA_PART first.")
     environment = kernel_environment(part)
     if part is not None:
-        print(f"Part {part} of stage 3: the sizes up to {CHECKPOINT_MAX}, then the checkpoint (section 6 of the build plan).")
+        print(f"Part {part} of stage 3 only: the sizes up to {CHECKPOINT_MAX}. No other stage runs; "
+              "the checkpoint is run afterwards (section 6 of the build plan).")
     minutes = []
     with tempfile.TemporaryDirectory() as scratch:
         for name in stages:

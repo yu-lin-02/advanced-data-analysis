@@ -42,14 +42,17 @@ DATA = ROOT / "data"
 RAW = DATA / "raw"
 
 # Quick mode only tests that the code runs: few sizes, few draws, small
-# models. It writes into folders that git ignores, and nothing it writes is
-# evidence. Start it with ADA_QUICK=1 python code/run_all.py.
+# models. Its results and figures go into folders that git ignores, and
+# nothing it writes is evidence. Stage 2, which quick mode does not change,
+# still writes data/gravity_clean.csv. Start it with ADA_QUICK=1 python
+# code/run_all.py.
 QUICK = os.environ.get("ADA_QUICK") == "1"
 RESULTS = ROOT / ("results_quick" if QUICK else "results")
 FIGURES = ROOT / ("figures_quick" if QUICK else "figures")
 if QUICK:
     print("Quick mode (ADA_QUICK=1): this run only tests that the code runs. "
-          "Its output goes to results_quick/ and figures_quick/ and is not evidence.")
+          "Its results and figures go to results_quick/ and figures_quick/ and are not evidence; "
+          "stage 2 still writes data/gravity_clean.csv.")
 
 # One seed for every random step, so the numbers in the paper can be reproduced.
 SEED = 2026
@@ -65,8 +68,8 @@ TARGET = "tradeflow_baci"
 INDICATORS = ["contig", "comlang_off", "col_dep_ever", "comcol", "fta_wto"]
 PREDICTORS = ["ln_gdp_o", "ln_gdp_d", "ln_dist"] + INDICATORS
 
-# Parameters of the stages (section 5 of the build plan). The second value of
-# each pair is the quick-mode value.
+# Parameters of the stages (section 5 of the build plan). Where a line reads
+# `A if QUICK else B`, A is the quick-mode value and B the full-run value.
 TEST_SHARE = 0.25  # share of unordered pairs in the test set
 SIZES = (50, 200, 1000) if QUICK else (50, 100, 200, 500, 1000, 2000, 5000)
 CHECKPOINT_MAX = 200 if QUICK else 1000  # largest size of part 1 (decision 11)
@@ -88,7 +91,9 @@ N_JOBS = int(os.environ.get("ADA_JOBS", "1"))  # decision 6
 
 # Part 1 of stage 3 (ADA_PART=1) runs the sizes up to CHECKPOINT_MAX, before
 # the checkpoint. Unset, stage 3 runs every size. Only 03_development.ipynb
-# reads it: every other notebook calls refuse_part().
+# reads it: stages 2 and 4 to 7 call refuse_part(). Stage 1 does not (section 5
+# item 2 of the plan leaves it unchanged), and run_all.py never passes ADA_PART
+# to it.
 _part = os.environ.get("ADA_PART")
 if _part not in (None, "1"):
     raise ValueError(f"ADA_PART is {_part!r}: it can only be 1, or unset to run every size.")

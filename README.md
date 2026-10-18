@@ -29,7 +29,7 @@ Other ways to run it:
 | `python code/run_all.py --download` | Stage 1 first, then stages 2 to 7 |
 | `python code/run_all.py --only 02_clean.ipynb` | One stage only |
 | `python code/run_all.py --part 1` | Part 1 of stage 3 only: the training sizes up to 1,000, before the checkpoint |
-| `ADA_QUICK=1 python code/run_all.py` | A quick test that the code runs, with few sizes and draws. Its output goes to `results_quick/` and `figures_quick/`, which git ignores, and is not evidence |
+| `ADA_QUICK=1 python code/run_all.py` | A quick test that the code runs, with few sizes and draws. Its results and figures go to `results_quick/` and `figures_quick/`, which git ignores, and are not evidence. Stage 2 has no quick-mode setting, so it writes the same `data/gravity_clean.csv` as a full run: never commit that file from a run outside the Nuvolos workspace |
 | `ADA_JOBS=4 python code/run_all.py` | Four workers for the long stages. The results do not depend on the number of workers |
 
 | Order | File | What it does |

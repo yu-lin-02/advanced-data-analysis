@@ -6,7 +6,7 @@
 |---|---|---|---|---|
 | `raw/Gravity_V202211.csv` | CEPII Gravity database, version V202211 ([page](https://www.cepii.fr/CEPII/en/bdd_modele/bdd_modele_item.asp?id=8), [zip](https://www.cepii.fr/DATA_DOWNLOAD/gravity/data/Gravity_csv_V202211.zip)) | Before 3 October 2026 (Yu's copy). Stage 1 prints the date of each new download. | Etalab Open Licence 2.0 | No: 1.25 GB, over GitHub's 100 MB limit. `code/01_get_data.ipynb` downloads it into `data/raw/`, which `.gitignore` leaves out (Requirement 4.15). |
 | `gravity_extract.csv` | Cut from the file above by `code/01_get_data.ipynb` | | Etalab Open Licence 2.0 | Yes, 8.3 MB |
-| `gravity_clean.csv` | Cleaned from the extract by `code/02_clean.ipynb` | | Etalab Open Licence 2.0 | Yes, 5.4 MB, once stage 2 has been run in the Nuvolos workspace. TODO: commit it from that run. |
+| `gravity_clean.csv` | Cleaned from the extract by `code/02_clean.ipynb` | | Etalab Open Licence 2.0 | Yes, once stage 2 has been run in the Nuvolos workspace. TODO: commit it from that run and give the size it prints. |
 
 ## The CEPII file
 
@@ -59,4 +59,4 @@ One row is one ordered pair of countries in one year, from the origin (`_o`) to 
 - **Kept.** Every recorded flow, however small: 1,562 usable rows in 2017 and 1,524 in 2019 have a flow below 1,000 USD (decision 3, no floor).
 - **Then.** The five indicators are stored as integers (each holds only 0 and 1), the natural logs of the two GDPs and of the distance are added, and `pair_id` names the unordered pair. The usable rows form 16,150 unordered pairs in 2017 (12,812 with both directions) and 15,620 in 2019 (12,487).
 
-`gravity_clean.csv` keeps 13 columns: `year`, `country_id_o`, `country_id_d`, `pair_id`, `tradeflow_baci` (in levels, thousand current USD) and the eight predictors `ln_gdp_o`, `ln_gdp_d`, `ln_dist`, `contig`, `comlang_off`, `col_dep_ever`, `comcol`, `fta_wto`. Run on the committed extract with the pinned packages (Python 3.12), stage 2 wrote 57,069 rows with SHA-256 `7c8eda4bd3c2e9295d38b902823af51abd46ca3757bed14cddf292d0c483a0c7`, which the notebook prints. TODO: confirm that the run in the Nuvolos workspace prints the same fingerprint.
+`gravity_clean.csv` keeps 13 columns: `year`, `country_id_o`, `country_id_d`, `pair_id`, `tradeflow_baci` (in levels, thousand current USD) and the eight predictors `ln_gdp_o`, `ln_gdp_d`, `ln_dist`, `contig`, `comlang_off`, `col_dep_ever`, `comcol`, `fta_wto`. It has one row per usable row of the two years, 57,069 in all, which the notebook checks. The notebook also prints the size and the SHA-256 fingerprint of the file it saves. TODO: copy both here from the run in the Nuvolos workspace.
