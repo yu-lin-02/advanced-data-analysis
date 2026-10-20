@@ -1,0 +1,9 @@
+sizes,picked,draws,won_ppml,won_rf,won_gbm
+50,rf,50,30,16,4
+100,gbm,50,38,4,8
+200,gbm,50,35,10,5
+500,ppml,50,38,8,4
+1000,ppml,50,36,6,8
+all,ppml,100,74,14,12
+all,rf,50,30,16,4
+all,gbm,100,73,14,13

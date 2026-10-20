@@ -1,0 +1,15 @@
+size,model,setting,tuned_value,side,neighbour_value,neighbour_config,neighbour_minus_tuned,se,at_edge,extension
+50,gbm,gbm_depth,1,below,2,gbm_depth2_trees50,0.0,0.0,False,
+50,rf,rf_features,3,below,8,rf_features8_leaf1,132298.82357232668,81479.92650157615,False,
+50,rf,rf_min_leaf,1,below,5,rf_features3_leaf5,423225.83687645703,50337.840443188834,True,cannot be extended
+100,rf,rf_features,3,below,8,rf_features8_leaf1,37005.636763712915,36823.886326312866,False,
+100,rf,rf_min_leaf,1,below,5,rf_features3_leaf5,337502.29781210585,26882.699604792942,True,cannot be extended
+200,rf,rf_features,8,above,3,rf_features3_leaf1,4144.995852697945,42455.484837278746,False,
+200,rf,rf_min_leaf,1,below,5,rf_features8_leaf5,87067.54863981839,37529.141093273276,True,cannot be extended
+500,gbm,gbm_depth,5,above,3,gbm_depth3_trees50,11388.95912209272,3519.949094080226,True,depth 7
+500,rf,rf_features,8,above,3,rf_features3_leaf1,82802.20510070039,13998.588677364425,True,cannot be extended
+500,rf,rf_min_leaf,1,below,5,rf_features8_leaf5,190752.9376546047,36875.00064921816,True,cannot be extended
+1000,gbm,gbm_depth,1,below,2,gbm_depth2_trees500,36649.22769443003,8425.063589134566,True,cannot be extended
+1000,gbm,gbm_trees,500,above,400,gbm_depth1_trees400,2690.3382746033835,1012.4818168860279,True,"750 and 1,000 trees, with GBM_MAX_TREES 1,000"
+1000,rf,rf_features,8,above,3,rf_features3_leaf1,26641.054191171024,42505.378839604615,False,
+1000,rf,rf_min_leaf,1,below,5,rf_features8_leaf5,81371.19941820748,53987.29476481951,False,
