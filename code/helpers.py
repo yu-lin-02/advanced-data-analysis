@@ -4,7 +4,9 @@
 # download and the two years of the project. Later asked for (18 October
 # 2026, section 5 of docs/build_plan.md): one thread per model, a quick mode
 # for testing the code, the parameters of every stage, and random generators
-# built from the one seed.
+# built from the one seed. Later asked for (20 October 2026, decisions 15 and 17
+# of docs/build_plan.md): the switch and penalty grid of the ridge line, and the
+# number of keys in the seed of each random generator.
 """Code used by more than one notebook (Requirement 4.9).
 
 Every notebook imports this module in its first code cell, before pandas,
@@ -87,6 +89,11 @@ CV_DRAWS = 2 if QUICK else 50  # decision 4
 BOOTSTRAP = 50 if QUICK else 1000
 MIN_FLOW = None  # decision 3: no floor, every recorded flow is kept
 NOISE_VAR = 1.0  # decision 5
+# Decision 15: a ridge-penalised ppml as a third reference line. It runs only if
+# Yu adds it at the checkpoint (section 6 of the build plan, Ridge line); its
+# penalty grid is fixed here, before part 1.
+RIDGE_LINE = False
+RIDGE_ALPHAS = (0.0001, 0.001, 0.01, 0.1, 1, 10)
 N_JOBS = int(os.environ.get("ADA_JOBS", "1"))  # decision 6
 
 # Part 1 of stage 3 (ADA_PART=1) runs the sizes up to CHECKPOINT_MAX, before
@@ -117,17 +124,22 @@ PURPOSES = {"split": 1, "draw": 2, "model": 3, "noise": 4, "cv": 5, "bootstrap":
 def rng(purpose, *keys):
     """A random generator for one step, built from SEED, the purpose and the keys.
 
-    The keys are non-negative integers that name the step, such as the year,
-    the split, the training size and the draw. The same purpose and keys always
-    give the same numbers, so a result does not depend on the order of the
-    loops or on the number of workers.
+    The keys are integers from 0 to 2**32 - 1 that name the step, such as the
+    year, the split, the training size and the draw. The same purpose and keys
+    always give the same numbers, so a result does not depend on the order of
+    the loops or on the number of workers.
     """
     if purpose not in PURPOSES:
         raise ValueError(f"Unknown purpose {purpose!r}: use one of {sorted(PURPOSES)}.")
     for key in keys:
-        if not isinstance(key, (int, np.integer)) or key < 0:
-            raise ValueError(f"Keys must be non-negative integers, got {key!r}.")
-    return np.random.default_rng([SEED, PURPOSES[purpose], *[int(key) for key in keys]])
+        if isinstance(key, bool) or not isinstance(key, (int, np.integer)) or not 0 <= key < 2**32:
+            raise ValueError(f"Keys must be integers from 0 to 2**32 - 1, got {key!r}.")
+    # The number of keys is part of the seed (decision 17). numpy pads a seed
+    # shorter than four numbers with zeros, so without it rng("split", 2017)
+    # and rng("split", 2017, 0) would give the same numbers. A key below 2**32
+    # is one number of the seed, so two different lists of keys always give
+    # different seeds.
+    return np.random.default_rng([SEED, PURPOSES[purpose], len(keys), *[int(key) for key in keys]])
 
 
 def seed_int(purpose, *keys):
