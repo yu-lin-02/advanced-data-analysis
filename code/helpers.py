@@ -10,7 +10,9 @@
 # October 2026, step 2 of section 10 of docs/build_plan.md): the functions of
 # stage 3 (the test split, one training draw with its 13 fits, the rows it
 # writes, the split of the error into variance and remainder) and those of the
-# checkpoint report that stages 4, 5 and 7 will reuse.
+# checkpoint report that stages 4, 5 and 7 will reuse. Later asked for (20
+# October 2026, decision 19 of docs/build_plan.md): the boosting grid extended
+# as the rule Grid edges of the checkpoint called for.
 """Code used by more than one notebook (Requirement 4.9).
 
 Every notebook imports this module in its first code cell, before pandas,
@@ -94,9 +96,12 @@ DRAWS = 4 if QUICK else 50
 RF_TREES = 20 if QUICK else 100
 RF_MAX_FEATURES = (1.0, 3)  # 1.0 means all eight predictors, 3 means three
 RF_MIN_LEAF = (1, 5, 20)
-GBM_MAX_TREES = 100 if QUICK else 500
-GBM_TREE_COUNTS = (25, 50, 100) if QUICK else (25, 50, 100, 200, 300, 400, 500)
-GBM_DEPTHS = (1, 2, 3, 5)
+# Decision 19: the checkpoint's rule Grid edges added depth 7 (in quick mode
+# too) and, in the full run, 750 and 1,000 trees with GBM_MAX_TREES 1,000. The
+# first run of part 1 had depths 1 to 5 and at most 500 trees.
+GBM_MAX_TREES = 100 if QUICK else 1000
+GBM_TREE_COUNTS = (25, 50, 100) if QUICK else (25, 50, 100, 200, 300, 400, 500, 750, 1000)
+GBM_DEPTHS = (1, 2, 3, 5, 7)
 GBM_LEARNING_RATE = 0.1
 GBM_MIN_LEAF = 20  # decision 9
 CV_FOLDS = 5
@@ -356,7 +361,7 @@ def fit_ppml(X_train, y_train, X_test):
 
 
 def run_draw(X_pool, y_pool, X_test, y_test, year, split_id, n, draw):
-    """Fit the 13 models on one training sample and predict the test rows for every configuration (section 7).
+    """Fit every model on one training sample and predict the test rows for every configuration (section 7).
 
     The sample is drawn with rng("draw", year, split_id, n, draw) and every
     model gets the same random_state, seed_int("model", year, split_id, n,
@@ -927,13 +932,25 @@ def crossings(gap_table):
 # Grid edges (section 6, Checkpoint): for each setting, its grid in order, and
 # the step beyond the first and the last value, fixed before part 1. None
 # means the grid cannot be extended on that side.
+# The rule has one round only, read on the first run of part 1. That round is
+# done (decision 19), so every step is None from now on: an edge found later,
+# on the rerun of part 1 or in the full run, is reported as a limit of the grid.
+GRID_EDGES_DONE = True
+
+
+def edge_step(text):
+    """The step beyond an edge, or None once the one round of Grid edges is done."""
+    return None if GRID_EDGES_DONE else text
+
+
 EDGE_GRIDS = {
     ("rf", "rf_features"): {"grid": sorted(rf_features(value) for value in RF_MAX_FEATURES),
-                            "below": "2 predictors per split", "above": None},
-    ("rf", "rf_min_leaf"): {"grid": sorted(RF_MIN_LEAF), "below": None, "above": "min_samples_leaf 50"},
-    ("gbm", "gbm_depth"): {"grid": sorted(GBM_DEPTHS), "below": None, "above": "depth 7"},
-    ("gbm", "gbm_trees"): {"grid": sorted(GBM_TREE_COUNTS), "below": "10 trees (staged, no extra fit)",
-                           "above": "750 and 1,000 trees, with GBM_MAX_TREES 1,000"},
+                            "below": edge_step("2 predictors per split"), "above": None},
+    ("rf", "rf_min_leaf"): {"grid": sorted(RF_MIN_LEAF), "below": None,
+                            "above": edge_step("min_samples_leaf 50")},
+    ("gbm", "gbm_depth"): {"grid": sorted(GBM_DEPTHS), "below": None, "above": edge_step("depth 7")},
+    ("gbm", "gbm_trees"): {"grid": sorted(GBM_TREE_COUNTS), "below": edge_step("10 trees (staged, no extra fit)"),
+                           "above": edge_step("750 and 1,000 trees, with GBM_MAX_TREES 1,000")},
 }
 
 
