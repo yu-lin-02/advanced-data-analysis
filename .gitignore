@@ -15,3 +15,8 @@ __pycache__/
 # limit. code/01_get_data.ipynb fetches it; the extract it saves in data/ is
 # committed (Requirement 4.15).
 data/raw/
+
+# Quick mode (ADA_QUICK=1) only tests that the code runs. Its output is never
+# committed (docs/build_plan.md, section 5).
+results_quick/
+figures_quick/
