@@ -1,6 +1,6 @@
 # Semester project: Advanced Data Analysis, HEC Lausanne, autumn 2026
 
-<!-- Outline drafted with Claude (Anthropic). Asked for: a README skeleton in the order given in the course document "Starting and Shipping Your Project". Later asked for (18 October 2026, section 5 of docs/build_plan.md): the seven stages of the build plan and their files. -->
+<!-- Outline drafted with Claude (Anthropic). Asked for: a README skeleton in the order given in the course document "Starting and Shipping Your Project". Later asked for (18 October 2026, section 5 of docs/build_plan.md): the seven stages of the build plan and their files. Later asked for (20 October 2026, step 2 of section 10 of the build plan): how to run the checkpoint report. -->
 
 ## What this project does
 
@@ -29,6 +29,7 @@ Other ways to run it:
 | `python code/run_all.py --download` | Stage 1 first, then stages 2 to 7 |
 | `python code/run_all.py --only 02_clean.ipynb` | One stage only |
 | `python code/run_all.py --part 1` | Part 1 of stage 3 only: the training sizes up to 1,000, before the checkpoint |
+| `python code/run_all.py --only 03b_checkpoint.ipynb` | The checkpoint report, on the copies of the two files of part 1 in `results/checkpoint/inputs/`. With `ADA_CHECKPOINT=rerun` in front, on the copies of a rerun of part 1 in `results/checkpoint/rerun/inputs/` instead |
 | `ADA_QUICK=1 python code/run_all.py` | A quick test that the code runs, with few sizes and draws. Its results and figures go to `results_quick/` and `figures_quick/`, which git ignores, and are not evidence. Stage 2 has no quick-mode setting, so it writes the same `data/gravity_clean.csv` as a full run: never commit that file from a run outside the Nuvolos workspace |
 | `ADA_JOBS=4 python code/run_all.py` | Four workers for the long stages. The results do not depend on the number of workers |
 
