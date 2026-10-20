@@ -254,8 +254,10 @@ def test_groups(y_test):
     """The group of each test row: 0 for the largest 1% of test flows, 1 for the next 9%, 2 for the rest.
 
     Fixed once from the test flows of the split, so every model and every draw
-    is scored on the same rows. Rows are ranked by flow, largest first, and
-    the counts are rounded down; equal flows keep their order in the test set.
+    is scored on the same rows. Rows are ranked by flow, largest first. The
+    counts of the largest 1% and of the largest 10% are rounded down, and
+    group 1 is the largest 10% without group 0 (so it can be one row more than
+    9% rounded down). Equal flows keep their order in the test set.
     """
     order = np.argsort(-y_test, kind="stable")
     top = int(0.01 * len(y_test))
@@ -361,9 +363,11 @@ def run_draw(X_pool, y_pool, X_test, y_test, year, split_id, n, draw):
     draw), so a draw gives the same numbers whichever worker runs it. Returns,
     in the order of CONFIGURATIONS, the test predictions, the mean Poisson
     deviance on the training sample (out-of-bag for rf, none for tree) and the
-    seconds of the fit each configuration came from (the fit alone, as stage 3
-    step 5 defines them: predicting and scoring are not timed); and what
-    stage 3 records about the sample and the ppml fit.
+    seconds of the fit each configuration came from (the fit call alone, as
+    stage 3 step 5 defines them: predicting the test rows and scoring are not
+    timed, but the fit of a forest includes the out-of-bag predictions that
+    oob_score=True makes scikit-learn compute); and what stage 3 records about
+    the sample and the ppml fit.
     """
     # Decision 15: the ridge line is written in its own pull request, only if Yu adds it at the checkpoint.
     assert not RIDGE_LINE, "RIDGE_LINE is True, but the ridge line has not been written yet (decision 15)."
