@@ -2,7 +2,10 @@
 # stage notebooks in order, each one in a fresh kernel. Later asked for (18
 # October 2026, section 5 of docs/build_plan.md): the seven stages, running
 # one stage alone, part 1 of stage 3 before the checkpoint, one thread per
-# model, the minutes each stage took, and what each notebook prints.
+# model, the minutes each stage took, and what each notebook prints. Later
+# asked for (20 October 2026, step 2 of section 10 of the build plan): the
+# checkpoint's folder taken from helpers, and its inputs copied without
+# changing a digit.
 """Run the project from start to finish (Requirements 4.7 and 4.8).
 
 From the repository folder:
@@ -35,7 +38,7 @@ import time
 from pathlib import Path
 
 # helpers comes before pandas, as in every notebook (section 7 of the build plan).
-from helpers import CHECKPOINT_MAX, QUICK, RESULTS
+from helpers import CHECKPOINT, CHECKPOINT_MAX, QUICK, RESULTS
 
 import pandas as pd
 
@@ -113,11 +116,12 @@ def copy_checkpoint_inputs():
         print(f"Skipping {CHECKPOINT_STAGE}: it runs once stage 3 writes "
               f"{' and '.join(DEVELOPMENT_FILES)} and the notebook exists.", flush=True)
         return False
-    inputs = RESULTS / "checkpoint" / "inputs"
+    inputs = CHECKPOINT / "inputs"
     inputs.mkdir(parents=True, exist_ok=True)
     for source in sources:
         # Stage 3 keys every row by year, split, size and draw; "size" is the training size.
-        table = pd.read_csv(source)
+        # round_trip reads every number back exactly as stage 3 wrote it.
+        table = pd.read_csv(source, float_precision="round_trip")
         table[table["size"] <= CHECKPOINT_MAX].to_csv(inputs / source.name, index=False, lineterminator="\n")
     print(f"Copied the rows of the sizes up to {CHECKPOINT_MAX} into {inputs.relative_to(CODE.parent)}", flush=True)
     return True
