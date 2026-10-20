@@ -316,7 +316,8 @@ def fit_ppml(X_train, y_train, X_test):
     (its coefficient is in effect zero), because PoissonRegressor(alpha=0)
     needs a design matrix of full rank (stage 3). If the other columns are
     collinear, scikit-learn warns and falls back from Newton-Cholesky to
-    L-BFGS: that is recorded, not repaired.
+    L-BFGS: that is recorded, not repaired. What is recorded is whether
+    scikit-learn warned that it fell back, as the plan words it.
     """
     indicator_columns = [PREDICTORS.index(name) for name in INDICATORS]
     constant = [j for j in indicator_columns if X_train[:, j].min() == X_train[:, j].max()]
@@ -324,7 +325,9 @@ def fit_ppml(X_train, y_train, X_test):
     model = make_ppml()
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
+        start = time.perf_counter()
         model.fit(X_train[:, kept], y_train)
+        seconds = time.perf_counter() - start
     fell_back = False
     for warning in caught:
         if "lbfgs" in str(warning.message):
@@ -344,6 +347,7 @@ def fit_ppml(X_train, y_train, X_test):
         "ones": {name: int(X_train[:, PREDICTORS.index(name)].sum()) for name in INDICATORS},
         "constant_columns": len(constant),
         "fell_back": fell_back,
+        "seconds": seconds,
         # Section 8: unpenalised PPML predicts the observed training total, unless the fit fell back.
         "total_ratio": train_predicted.sum() / y_train.sum(),
     }
@@ -357,8 +361,9 @@ def run_draw(X_pool, y_pool, X_test, y_test, year, split_id, n, draw):
     draw), so a draw gives the same numbers whichever worker runs it. Returns,
     in the order of CONFIGURATIONS, the test predictions, the mean Poisson
     deviance on the training sample (out-of-bag for rf, none for tree) and the
-    seconds of the fit each configuration came from, with its predictions; and
-    what stage 3 records about the sample and the ppml fit.
+    seconds of the fit each configuration came from (the fit alone, as stage 3
+    step 5 defines them: predicting and scoring are not timed); and what
+    stage 3 records about the sample and the ppml fit.
     """
     # Decision 15: the ridge line is written in its own pull request, only if Yu adds it at the checkpoint.
     assert not RIDGE_LINE, "RIDGE_LINE is True, but the ridge line has not been written yet (decision 15)."
@@ -368,9 +373,8 @@ def run_draw(X_pool, y_pool, X_test, y_test, year, split_id, n, draw):
     seed = seed_int("model", year, split_id, n, draw)
     test_predicted, train_deviance, seconds = {}, {}, {}
 
-    start = time.perf_counter()
     ppml = fit_ppml(X_train, y_train, X_test)
-    seconds["ppml"] = time.perf_counter() - start
+    seconds["ppml"] = ppml["seconds"]
     test_predicted["ppml"] = ppml["test_predicted"]
     train_deviance["ppml"] = mean_poisson_deviance(y_train, ppml["train_predicted"])
 
@@ -383,8 +387,8 @@ def run_draw(X_pool, y_pool, X_test, y_test, year, split_id, n, draw):
                 # no out-of-bag prediction; such rows are left out of the training deviance below.
                 warnings.filterwarnings("ignore", message="Some inputs do not have OOB scores")
                 forest = make_rf(max_features, min_leaf, seed).fit(X_train, y_train)
-            test_predicted[config] = forest.predict(X_test)
             seconds[config] = time.perf_counter() - start
+            test_predicted[config] = forest.predict(X_test)
             # scikit-learn leaves the out-of-bag prediction at 0 for a row that no tree left out.
             has_oob = forest.oob_prediction_ > 0
             train_deviance[config] = mean_poisson_deviance(y_train[has_oob], forest.oob_prediction_[has_oob])
@@ -392,6 +396,7 @@ def run_draw(X_pool, y_pool, X_test, y_test, year, split_id, n, draw):
     for depth in GBM_DEPTHS:
         start = time.perf_counter()
         boosted = make_gbm(depth, seed).fit(X_train, y_train)
+        elapsed = time.perf_counter() - start
         # One fit with GBM_MAX_TREES trees gives the predictions after every
         # count in GBM_TREE_COUNTS (section 7, staged prediction).
         for trees, predicted in enumerate(boosted.staged_predict(X_test), start=1):
@@ -400,19 +405,20 @@ def run_draw(X_pool, y_pool, X_test, y_test, year, split_id, n, draw):
         for trees, predicted in enumerate(boosted.staged_predict(X_train), start=1):
             if trees in GBM_TREE_COUNTS:
                 train_deviance[f"gbm_depth{depth}_trees{trees}"] = mean_poisson_deviance(y_train, predicted)
-        elapsed = time.perf_counter() - start
         for trees in GBM_TREE_COUNTS:
             seconds[f"gbm_depth{depth}_trees{trees}"] = elapsed
 
+    # The "fit" of mean is the mean of the training flows.
     start = time.perf_counter()
     mean_flow = y_train.mean()
+    seconds["mean"] = time.perf_counter() - start
     test_predicted["mean"] = np.full(len(y_test), mean_flow)
     train_deviance["mean"] = mean_poisson_deviance(y_train, np.full(len(y_train), mean_flow))
-    seconds["mean"] = time.perf_counter() - start
 
     start = time.perf_counter()
-    test_predicted["tree"] = make_tree(seed).fit(X_train, y_train).predict(X_test)
+    tree = make_tree(seed).fit(X_train, y_train)
     seconds["tree"] = time.perf_counter() - start
+    test_predicted["tree"] = tree.predict(X_test)
     # A tree grown to full depth fits its own sample exactly, so its training deviance is not recorded.
     train_deviance["tree"] = np.nan
 
@@ -567,9 +573,10 @@ def largest_relative_difference(new, old, keys, skip=("seconds",)):
     """The largest relative difference between two tables over the rows and columns they share.
 
     Rows are matched on keys. For a number, the difference is |a - b| divided
-    by the larger of |a| and |b| (0 when both are 0 or both missing, and
-    infinite when only one is missing). Any difference in a text column is
-    infinite. Returns the difference and the number of rows shared.
+    by the larger of |a| and |b| (0 when the two are equal or both missing,
+    and infinite when only one is missing or only one is infinite). Any
+    difference in a text column is infinite. Returns the difference and the
+    number of rows shared.
     """
     shared_columns = [column for column in new.columns if column in old.columns and column not in keys
                       and column not in skip]
@@ -585,6 +592,10 @@ def largest_relative_difference(new, old, keys, skip=("seconds",)):
             scale = np.maximum(np.abs(a), np.abs(b))
             with np.errstate(invalid="ignore", divide="ignore"):
                 difference = np.where(scale > 0, np.abs(a - b) / scale, 0.0)
+            # Equal values, infinities included, do not differ; any other case
+            # that gives no number (an infinity against a finite value) is a difference.
+            difference[a == b] = 0.0
+            difference[np.isnan(difference)] = np.inf
             difference[both_missing] = 0.0
             difference[one_missing] = np.inf
             if len(difference):
@@ -675,6 +686,53 @@ def per_draw(runs, lines, column="test_deviance"):
     return wide
 
 
+def learning_curves(summary, lines):
+    """For every size and line: the mean test deviance, a band of two standard errors and the mean training deviance.
+
+    Checkpoint item 1, and the figure learning_curves of stage 7. The training
+    deviance follows the tuned setting at each size.
+    """
+    curves = summary.merge(lines, on=["size", "config"])
+    curves = curves[["size", "line", "config", "draws", "mean", "se", "train_deviance"]].copy()
+    curves["lower"] = curves["mean"] - 2 * curves["se"]
+    curves["upper"] = curves["mean"] + 2 * curves["se"]
+    return curves.sort_values(["line", "size"]).reset_index(drop=True)
+
+
+def ppml_wins(draws, best):
+    """By size, the number of draws in which ppml has the lower test deviance than tuned rf, tuned gbm and best.
+
+    draws comes from per_draw, best from better_ensemble. Used by the checkpoint
+    (item 3) and stage 4 step 1 (decision 12). A tie is not a win.
+    """
+    merged = draws.merge(best, on="size")
+    best_deviance = np.where(merged["best"] == "rf", merged["rf"], merged["gbm"])
+    merged["beats_rf"] = merged["ppml"] < merged["rf"]
+    merged["beats_gbm"] = merged["ppml"] < merged["gbm"]
+    merged["beats_best"] = merged["ppml"] < best_deviance
+    wins = merged.groupby("size").agg(draws=("draw", "size"), best=("best", "first"),
+                                      ppml_beats_rf=("beats_rf", "sum"), ppml_beats_gbm=("beats_gbm", "sum"),
+                                      ppml_beats_best=("beats_best", "sum"))
+    return wins.reset_index()
+
+
+def selection_choices(draws, picks):
+    """One row per size and draw: the model the size rule picked, the winner of the draw, and the regret.
+
+    draws comes from per_draw, picks from size_rule. The regret (difference)
+    is the picked model's test deviance minus the lowest of the three on the
+    same draw. The result is what selection_confusion reads.
+    """
+    choices = draws.merge(picks.rename(columns={"chosen": "picked"}), on="size")
+    choices["winner"] = winners(choices)
+    choices["picked_deviance"] = np.nan
+    for model in CANDIDATES:
+        is_picked = choices["picked"] == model
+        choices.loc[is_picked, "picked_deviance"] = choices.loc[is_picked, model]
+    choices["difference"] = choices["picked_deviance"] - choices[list(CANDIDATES)].min(axis=1)
+    return choices
+
+
 def size_rule(summary, lines):
     """At each size, the candidate with the lowest mean test deviance (stage 4 step 3).
 
@@ -694,7 +752,7 @@ def size_rule(summary, lines):
     return pd.DataFrame(rows)
 
 
-def better_ensemble(summary, tuned):
+def better_ensemble(tuned):
     """At each size, the better of tuned rf and tuned gbm by mean test deviance (the best comparison).
 
     A tie goes to rf, the first of the two.
@@ -739,7 +797,9 @@ def selection_confusion(choices, candidates=CANDIDATES):
     for scope, group in scopes:
         for picked in candidates:
             picked_rows = group[group["picked"] == picked]
-            if len(picked_rows) == 0:
+            # At one size the size rule picks one model, so its table is one row;
+            # pooled over sizes the table keeps all three rows, zeros included.
+            if len(picked_rows) == 0 and scope != "all":
                 continue
             row = {"sizes": scope, "picked": picked, "draws": len(picked_rows)}
             for winner in candidates:
@@ -768,23 +828,27 @@ def find_crossing(sizes, gap):
     reversal: one change, from zero or positive to negative; no n_star.
     reversal_then_crossing: two changes, first to negative and then back;
     last_crossing is interpolated at the second change as n_star is.
-    several: anything else, with no n_star.
+    several: anything else, with no n_star. crossing_from and crossing_to are
+    the two sizes around the change that n_star or last_crossing comes from.
     """
     sizes = np.asarray(sizes, dtype=float)
     gap = np.asarray(gap, dtype=float)
     negative = gap < 0
     changes = [i for i in range(len(gap) - 1) if negative[i] != negative[i + 1]]
-    result = {"pattern": "several", "n_star": np.nan, "last_crossing": np.nan}
+    result = {"pattern": "several", "n_star": np.nan, "last_crossing": np.nan,
+              "crossing_from": np.nan, "crossing_to": np.nan}
     if not changes:
         result["pattern"] = "never_overtaken" if negative.all() else "never_ahead"
     elif len(changes) == 1 and negative[changes[0]]:
         result["pattern"] = "one_crossing"
         result["n_star"] = interpolate_crossing(sizes, gap, changes[0])
+        result["crossing_from"], result["crossing_to"] = int(sizes[changes[0]]), int(sizes[changes[0] + 1])
     elif len(changes) == 1:
         result["pattern"] = "reversal"
     elif len(changes) == 2 and not negative[changes[0]]:
         result["pattern"] = "reversal_then_crossing"
         result["last_crossing"] = interpolate_crossing(sizes, gap, changes[1])
+        result["crossing_from"], result["crossing_to"] = int(sizes[changes[1]]), int(sizes[changes[1] + 1])
     return result
 
 
@@ -800,6 +864,7 @@ def check_find_crossing():
     sizes = (50, 100, 200, 500)
     one = find_crossing(sizes, (-2, -1, 1, 2))
     assert one["pattern"] == "one_crossing" and round(one["n_star"], 2) == 141.42, one
+    assert (one["crossing_from"], one["crossing_to"]) == (100, 200), one
     back = find_crossing(sizes, (2, -1, 1, 2))
     assert back["pattern"] == "reversal_then_crossing" and round(back["last_crossing"], 2) == 141.42, back
     assert find_crossing(sizes, (1, -1, -2, -3))["pattern"] == "reversal"
@@ -816,7 +881,7 @@ def gaps(components, runs, tuned):
     is the remainder, so error gap = bias gap - variance gap. The standard
     error of the error gap is paired over draws.
     """
-    best = better_ensemble(summarise(runs), tuned)
+    best = better_ensemble(tuned)
     rows = []
     for size in sorted(tuned["size"].unique()):
         at_size = components[components["size"] == size].set_index("config")
@@ -944,6 +1009,34 @@ def divergences(runs):
     merged = runs[runs["model"] == "gbm"].merge(mean_draws, on=["size", "draw"], suffixes=("", "_mean"))
     diverged = (merged["test_deviance"] > 10 * merged["test_deviance_mean"]) | (merged["max_pred_ratio"] > 1000)
     return merged[diverged][["size", "draw", "config", "test_deviance", "test_deviance_mean", "max_pred_ratio"]]
+
+
+def health_table(runs, components):
+    """By size, the health checks of checkpoint item 7 in one table.
+
+    The largest relative difference in the identity error = remainder_raw +
+    variance_raw (section 8); for ppml, the draws with an indicator constant
+    in the sample, the fits scikit-learn warned had fallen back to L-BFGS and
+    the largest relative difference between the predicted and the observed
+    training total; the rows worse than mean on the same sample; and the gbm
+    divergences of the rule Stability.
+    """
+    identity = (components["error"] - components["remainder_raw"] - components["variance_raw"]).abs() / components["error"]
+    worse = worse_than_mean(runs)
+    diverged = divergences(runs)
+    rows = []
+    for n in sorted(runs["size"].unique()):
+        ppml = runs[(runs["size"] == n) & (runs["config"] == "ppml")]
+        rows.append({
+            "size": n,
+            "identity_largest_difference": identity[components["size"] == n].max(),
+            "ppml_draws_with_constant_indicator": int((ppml["constant_columns"] > 0).sum()),
+            "ppml_lbfgs_fallbacks": int(ppml["lbfgs_fallback"].sum()),
+            "ppml_largest_total_difference": (ppml["train_total_ratio"] - 1).abs().max(),
+            "rows_worse_than_mean": int((worse["size"] == n).sum()),
+            "gbm_divergences": int((diverged["size"] == n).sum()),
+        })
+    return pd.DataFrame(rows)
 
 
 def seconds_per_draw(runs):

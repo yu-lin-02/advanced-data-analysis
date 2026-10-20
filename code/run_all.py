@@ -5,7 +5,7 @@
 # model, the minutes each stage took, and what each notebook prints. Later
 # asked for (20 October 2026, step 2 of section 10 of the build plan): the
 # checkpoint's folder taken from helpers, and its inputs copied without
-# changing a digit.
+# changing a value.
 """Run the project from start to finish (Requirements 4.7 and 4.8).
 
 From the repository folder:
