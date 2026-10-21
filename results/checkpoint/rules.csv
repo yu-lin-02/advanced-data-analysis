@@ -1,0 +1,5 @@
+rule,fires,calls_for
+Grid edges,True,"gbm gbm_depth: depth 7; gbm gbm_trees: 750 and 1,000 trees, with GBM_MAX_TREES 1,000"
+Stability,False,
+Sizes,False,
+Ridge line,False,Yu's choice (decision 15)

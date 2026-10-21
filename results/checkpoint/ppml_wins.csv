@@ -1,0 +1,6 @@
+size,draws,best,ppml_beats_rf,ppml_beats_gbm,ppml_beats_best
+50,50,rf,30,32,30
+100,50,gbm,39,39,39
+200,50,gbm,39,36,36
+500,50,gbm,39,39,39
+1000,50,gbm,42,37,37
