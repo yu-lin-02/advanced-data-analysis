@@ -1,0 +1,4 @@
+comparison,sizes,pattern,n_star,last_crossing,crossing_from,crossing_to
+rf,5,reversal,,,,
+gbm,5,reversal,,,,
+best,5,reversal,,,,
