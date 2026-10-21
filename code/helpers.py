@@ -14,7 +14,10 @@
 # October 2026, decision 19 of docs/build_plan.md, "Apply"; prepared on 20
 # October before Yu's answer): the boosting grid extended as the rule Grid
 # edges of the checkpoint called for, with the report of grid edges read on
-# the grid its inputs were made on.
+# the grid its inputs were made on. Later asked for (21 October 2026, decision
+# 20 of docs/build_plan.md, "Add it"): the ridge line, a ridge-penalised ppml
+# whose penalty is chosen by cross-validation inside each training sample,
+# fitted on every draw from the full run of stage 3 on.
 """Code used by more than one notebook (Requirement 4.9).
 
 Every notebook imports this module in its first code cell, before pandas,
@@ -111,10 +114,11 @@ CV_DRAWS = 2 if QUICK else 50  # decision 4
 BOOTSTRAP = 50 if QUICK else 1000
 MIN_FLOW = None  # decision 3: no floor, every recorded flow is kept
 NOISE_VAR = 1.0  # decision 5
-# Decision 15: a ridge-penalised ppml as a third reference line. It runs only if
-# Yu adds it at the checkpoint (section 6 of the build plan, Ridge line); its
-# penalty grid is fixed here, before part 1.
-RIDGE_LINE = False
+# Decisions 15, 18 and 20: a ridge-penalised ppml as a third reference line,
+# which Yu added at the checkpoint (section 6 of the build plan, Ridge line). Its
+# penalty grid was fixed before part 1. Part 1 ran with RIDGE_LINE False, so no
+# file of part 1 has a ridge row.
+RIDGE_LINE = True
 RIDGE_ALPHAS = (0.0001, 0.001, 0.01, 0.1, 1, 10)
 N_JOBS = int(os.environ.get("ADA_JOBS", "1"))  # decision 6
 
@@ -215,6 +219,8 @@ def model_configurations():
                                    "gbm_depth": depth, "gbm_trees": trees})
     configurations.append({"model": "mean", "config": "mean"})
     configurations.append({"model": "tree", "config": "tree"})
+    if RIDGE_LINE:
+        configurations.append({"model": "ridge", "config": "ridge"})
     return configurations
 
 
@@ -222,13 +228,15 @@ CONFIGURATIONS = model_configurations()
 # The three groups of test rows whose deviance stage 3 records separately.
 GROUP_NAMES = ("top1", "next9", "rest")
 # The columns of dev_runs.csv, in order (stage 3 step 5). The coefficient and
-# ones_ columns are filled on the ppml rows only (decision 14).
+# ones_ columns are filled on the ppml rows only (decision 14), and ridge_alpha,
+# the penalty that cross-validation chose on the draw, on the ridge rows only.
 RUN_COLUMNS = (
     ["variant", "year", "split", "size", "draw", "model", "config",
      "rf_features", "rf_min_leaf", "gbm_depth", "gbm_trees",
      "test_deviance", "d2", "mae_rel", "rmse_rel", "train_deviance"]
     + [f"deviance_{name}" for name in GROUP_NAMES]
-    + ["max_pred_ratio", "seconds", "constant_columns", "lbfgs_fallback", "train_total_ratio", "coef_intercept"]
+    + ["max_pred_ratio", "seconds", "constant_columns", "lbfgs_fallback", "ridge_alpha", "train_total_ratio",
+       "coef_intercept"]
     + [f"coef_{name}" for name in PREDICTORS]
     + [f"ones_{name}" for name in INDICATORS]
 )
@@ -294,6 +302,11 @@ def draw_sample(pool_rows, year, split_id, n, draw):
 def make_ppml():
     """The gravity equation estimated by PPML. alpha=0: the default alpha=1 would add a ridge penalty."""
     return PoissonRegressor(alpha=0, solver="newton-cholesky")
+
+
+def make_ridge(alpha):
+    """ppml with a ridge penalty of strength alpha on the coefficients (the ridge line). The intercept is not penalised."""
+    return PoissonRegressor(alpha=alpha, solver="newton-cholesky")
 
 
 def make_rf(max_features, min_leaf, seed):
@@ -362,22 +375,90 @@ def fit_ppml(X_train, y_train, X_test):
     }
 
 
-def run_draw(X_pool, y_pool, X_test, y_test, year, split_id, n, draw):
+def fit_ridge_once(alpha, X_fit, y_fit, X_other):
+    """One fit of the ridge line on the rows X_fit, y_fit (section 6, Ridge line).
+
+    Each predictor is standardised with its mean and standard deviation over
+    the rows of this fit (ddof 0, as StandardScaler computes it), so that the
+    penalty weighs every coefficient on the same scale. A column with one
+    value on those rows cannot be standardised and is dropped from this fit,
+    as ppml drops a constant indicator. The flow is divided by its mean over
+    the same rows, so that alpha means the same at every size and in both
+    years (decision 18), and the predictions are multiplied back into thousand
+    USD. Returns the predictions for the rows X_other and for the fit rows,
+    and the seconds of the fit call.
+    """
+    kept = [j for j in range(X_fit.shape[1]) if X_fit[:, j].min() != X_fit[:, j].max()]
+    centre = X_fit[:, kept].mean(axis=0)
+    spread = X_fit[:, kept].std(axis=0)
+    level = y_fit.mean()
+    model = make_ridge(alpha)
+    start = time.perf_counter()
+    model.fit((X_fit[:, kept] - centre) / spread, y_fit / level)
+    seconds = time.perf_counter() - start
+    return {
+        "other_predicted": level * model.predict((X_other[:, kept] - centre) / spread),
+        "fit_predicted": level * model.predict((X_fit[:, kept] - centre) / spread),
+        "seconds": seconds,
+    }
+
+
+def fit_ridge(X_train, y_train, pair_train, X_test, year, split_id, n, draw):
+    """Fit the ridge line on one training sample (section 6, Ridge line; decisions 15, 18 and 20).
+
+    5-fold cross-validation inside the sample picks alpha from RIDGE_ALPHAS:
+    the value with the lowest mean, over the five folds, of the mean Poisson
+    deviance on the validation fold, in thousand USD. A tie goes to the larger
+    value, the simpler model. The folds keep both directions of a pair
+    together, as the test split does: the distinct pair_id values of the
+    sample, sorted, are permuted with rng("cv", year, split_id, n, draw) and
+    dealt to the folds in turn. The test rows are not used. The ridge line is
+    then refitted on the whole sample at the chosen value: 31 fits in all,
+    whose seconds are summed.
+    """
+    # np.unique returns the distinct values sorted.
+    permuted = rng("cv", year, split_id, n, draw).permutation(np.unique(pair_train))
+    fold_of_pair = {pair: i % CV_FOLDS for i, pair in enumerate(permuted)}
+    folds = np.array([fold_of_pair[pair] for pair in pair_train])
+    seconds = 0.0
+    cv_deviance = {}
+    for alpha in RIDGE_ALPHAS:
+        fold_deviances = []
+        for fold in range(CV_FOLDS):
+            validation = folds == fold
+            fit = fit_ridge_once(alpha, X_train[~validation], y_train[~validation], X_train[validation])
+            seconds += fit["seconds"]
+            fold_deviances.append(mean_poisson_deviance(y_train[validation], fit["other_predicted"]))
+        cv_deviance[alpha] = np.mean(fold_deviances)
+    # From the largest value down, a value replaces the one chosen so far only
+    # if its deviance is strictly lower, so a tie stays with the larger value.
+    chosen = max(RIDGE_ALPHAS)
+    for alpha in sorted(RIDGE_ALPHAS, reverse=True):
+        if cv_deviance[alpha] < cv_deviance[chosen]:
+            chosen = alpha
+    refit = fit_ridge_once(chosen, X_train, y_train, X_test)
+    seconds += refit["seconds"]
+    return {"test_predicted": refit["other_predicted"], "train_predicted": refit["fit_predicted"],
+            "alpha": chosen, "seconds": seconds}
+
+
+def run_draw(X_pool, y_pool, pair_pool, X_test, y_test, year, split_id, n, draw):
     """Fit every model on one training sample and predict the test rows for every configuration (section 7).
 
     The sample is drawn with rng("draw", year, split_id, n, draw) and every
     model gets the same random_state, seed_int("model", year, split_id, n,
-    draw), so a draw gives the same numbers whichever worker runs it. Returns,
-    in the order of CONFIGURATIONS, the test predictions, the mean Poisson
-    deviance on the training sample (out-of-bag for rf, none for tree) and the
-    seconds of the fit each configuration came from (the fit call alone, as
-    stage 3 step 5 defines them: predicting the test rows and scoring are not
-    timed, but the fit of a forest includes the out-of-bag predictions that
-    oob_score=True makes scikit-learn compute); and what stage 3 records about
-    the sample and the ppml fit.
+    draw), so a draw gives the same numbers whichever worker runs it. The
+    ridge line (when RIDGE_LINE is True) draws its folds from rng("cv", ...)
+    and the pair_id values of the sample (pair_pool holds those of the pool),
+    so it changes no random number of the other models. Returns, in the order
+    of CONFIGURATIONS, the test predictions, the mean Poisson deviance on the
+    training sample (out-of-bag for rf, none for tree) and the seconds of the
+    fit each configuration came from (the fit call alone, as stage 3 step 5
+    defines them: predicting the test rows and scoring are not timed, but the
+    fit of a forest includes the out-of-bag predictions that oob_score=True
+    makes scikit-learn compute, and the ridge line sums its 31 fits); and what
+    stage 3 records about the sample, the ppml fit and the ridge line.
     """
-    # Decision 15: the ridge line is written in its own pull request, only if Yu adds it at the checkpoint.
-    assert not RIDGE_LINE, "RIDGE_LINE is True, but the ridge line has not been written yet (decision 15)."
     assert max(GBM_TREE_COUNTS) <= GBM_MAX_TREES, "A tree count of GBM_TREE_COUNTS is above GBM_MAX_TREES."
     positions = draw_sample(len(y_pool), year, split_id, n, draw)
     X_train, y_train = X_pool[positions], y_pool[positions]
@@ -433,6 +514,13 @@ def run_draw(X_pool, y_pool, X_test, y_test, year, split_id, n, draw):
     # A tree grown to full depth fits its own sample exactly, so its training deviance is not recorded.
     train_deviance["tree"] = np.nan
 
+    ridge = None
+    if RIDGE_LINE:
+        ridge = fit_ridge(X_train, y_train, pair_pool[positions], X_test, year, split_id, n, draw)
+        seconds["ridge"] = ridge["seconds"]
+        test_predicted["ridge"] = ridge["test_predicted"]
+        train_deviance["ridge"] = mean_poisson_deviance(y_train, ridge["train_predicted"])
+
     order = [configuration["config"] for configuration in CONFIGURATIONS]
     return {
         "test_predicted": np.array([test_predicted[config] for config in order]),
@@ -441,10 +529,11 @@ def run_draw(X_pool, y_pool, X_test, y_test, year, split_id, n, draw):
         "largest_train_flow": y_train.max(),
         "constant_columns": ppml["constant_columns"],
         "ppml": ppml,
+        "ridge": ridge,
     }
 
 
-def run_draws(X_pool, y_pool, X_test, y_test, year, split_id, n, draws):
+def run_draws(X_pool, y_pool, pair_pool, X_test, y_test, year, split_id, n, draws):
     """Run the draws 0 to draws - 1 of one size and yield their results in the order of the draws.
 
     With N_JOBS = 1 the draws run one after the other in this process. With
@@ -456,12 +545,12 @@ def run_draws(X_pool, y_pool, X_test, y_test, year, split_id, n, draws):
     """
     if N_JOBS == 1:
         for draw in range(draws):
-            yield run_draw(X_pool, y_pool, X_test, y_test, year, split_id, n, draw)
+            yield run_draw(X_pool, y_pool, pair_pool, X_test, y_test, year, split_id, n, draw)
         return
     context = multiprocessing.get_context("forkserver")
     with concurrent.futures.ProcessPoolExecutor(max_workers=N_JOBS, mp_context=context) as executor:
-        yield from executor.map(run_draw, repeat(X_pool), repeat(y_pool), repeat(X_test), repeat(y_test),
-                                repeat(year), repeat(split_id), repeat(n), range(draws))
+        yield from executor.map(run_draw, repeat(X_pool), repeat(y_pool), repeat(pair_pool), repeat(X_test),
+                                repeat(y_test), repeat(year), repeat(split_id), repeat(n), range(draws))
 
 
 def check_predictions(predicted, keys):
@@ -507,6 +596,8 @@ def draw_rows(result, y_test, groups, keys):
                 row[f"coef_{name}"] = ppml["coefficients"][name]
             for name in INDICATORS:
                 row[f"ones_{name}"] = ppml["ones"][name]
+        if configuration["model"] == "ridge":
+            row["ridge_alpha"] = result["ridge"]["alpha"]
         rows.append(row)
     return rows
 
