@@ -1,6 +1,6 @@
 # Semester project: Advanced Data Analysis, HEC Lausanne, autumn 2026
 
-<!-- Outline drafted with Claude (Anthropic). Asked for: a README skeleton in the order given in the course document "Starting and Shipping Your Project". Later asked for (18 October 2026, section 5 of docs/build_plan.md): the seven stages of the build plan and their files. Later asked for (20 October 2026, step 2 of section 10 of the build plan): how to run the checkpoint report. Later asked for (20 October 2026, step 4 of section 10 of the build plan): the date the checkpoint report was run. -->
+<!-- Outline drafted with Claude (Anthropic). Asked for: a README skeleton in the order given in the course document "Starting and Shipping Your Project". Later asked for (18 October 2026, section 5 of docs/build_plan.md): the seven stages of the build plan and their files. Later asked for (20 October 2026, step 2 of section 10 of the build plan): how to run the checkpoint report. Later asked for (20 October 2026, step 4 of section 10 of the build plan): the date the checkpoint report was run. Later asked for (21 October 2026, decision 19 of the build plan): the report on the rerun of part 1. -->
 
 ## What this project does
 
@@ -38,13 +38,13 @@ Other ways to run it:
 | 1 | `code/01_get_data.ipynb` | Downloads the CEPII Gravity file into `data/raw/` (not committed), checks it, and saves the rows of 2017 and 2019 in `data/gravity_extract.csv` (committed). Only runs with `--download`. |
 | 2 | `code/02_clean.ipynb` | Cleans the extract and saves `data/gravity_clean.csv`, the table every model uses, and `results/cleaning_log.csv`. |
 | 3 | `code/03_development.ipynb` | Fits the models on training samples of every size in the development year (2017) and saves `results/dev_runs.csv` and `results/dev_components.csv`. |
-| 3b | `code/03b_checkpoint.ipynb` | The checkpoint report on part 1 of stage 3, in `results/checkpoint/`. |
+| 3b | `code/03b_checkpoint.ipynb` | The checkpoint report on part 1 of stage 3, in `results/checkpoint/`, and on the rerun of part 1, in `results/checkpoint/rerun/`. |
 | 4 | `code/04_size_rule.ipynb` | Tunes the ensembles, builds the size rule and finds the training size where the models cross, from the files of stage 3. |
 | 5 | `code/05_analysis.ipynb` | Tests the cutoff and the size rule against cross-validation in the analysis year (2019), at the settings fixed in stage 4. |
 | 6 | `code/06_checks.ipynb` | Repeats the development-year experiment with added noise, with another test split and with twice the trees. |
 | 7 | `code/07_figures.ipynb` | Makes every figure and table shown in the paper, in `figures/`. |
 
-`code/03b_checkpoint.ipynb` is not in the order of a full run. It was run once, between part 1 and the full run of stage 3, to review the results of the training sizes up to 1,000 under rules fixed in advance (section 6 of [`docs/build_plan.md`](docs/build_plan.md)). It was run on 20 October 2026, on the files of part 1 copied into `results/checkpoint/inputs/`. Quick mode runs it after stage 3, so that every push tests it.
+`code/03b_checkpoint.ipynb` is not in the order of a full run. It is run at the checkpoint, between part 1 and the full run of stage 3, to review the results of the training sizes up to 1,000 under rules fixed in advance (section 6 of [`docs/build_plan.md`](docs/build_plan.md)). It was run on 20 October 2026, on the files of part 1 copied into `results/checkpoint/inputs/`. Its rule Grid edges called for a wider boosting grid and one rerun of part 1 (decision 19), so it was run again on 21 October 2026, with `ADA_CHECKPOINT=rerun`, on the files of the rerun copied into `results/checkpoint/rerun/inputs/`; that report is in `results/checkpoint/rerun/`. Quick mode runs it after stage 3, so that every push tests it.
 
 `code/helpers.py` holds what more than one notebook uses. [`docs/build_plan.md`](docs/build_plan.md) describes every stage in detail.
 
