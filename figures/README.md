@@ -1,6 +1,6 @@
 # Figures
 
-<!-- Drafted with Claude (Anthropic). Asked for: a note stating the rule for this folder. Later asked for (18 October 2026, section 5 of docs/build_plan.md): the files stage 7 will write. -->
+<!-- Drafted with Claude (Anthropic). Asked for: a note stating the rule for this folder. Later asked for (18 October 2026, section 5 of docs/build_plan.md): the files stage 7 will write. Later asked for (21 October 2026, decision 19 of the build plan): the checkpoint report on the rerun of part 1. -->
 
 Every file in this folder is written by `code/07_figures.ipynb` (Requirement 4.11). Nothing is added by hand. Figures are saved as `.pdf`, tables as `.csv` and `.tex` (decision 7 of `docs/build_plan.md`).
 
@@ -21,4 +21,4 @@ TODO, with stage 7: one line per file. The plan (section 6, stage 7) lists:
 | `analysis_methods` | The three models, the size rule, cross-validated selection and the best of the three in the analysis year |
 | `noise_gaps` | The gaps with and without added noise |
 
-`code/03b_checkpoint.ipynb`, run once at the checkpoint, writes its learning curves to `results/checkpoint/`, not here: they are a report on part 1 of stage 3, not a figure of the paper.
+`code/03b_checkpoint.ipynb`, run at the checkpoint, writes its learning curves to `results/checkpoint/` (and, for the rerun of part 1, to `results/checkpoint/rerun/`), not here: they are a report on part 1 of stage 3, not a figure of the paper.
