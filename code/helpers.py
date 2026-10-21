@@ -10,9 +10,11 @@
 # October 2026, step 2 of section 10 of docs/build_plan.md): the functions of
 # stage 3 (the test split, one training draw with its 13 fits, the rows it
 # writes, the split of the error into variance and remainder) and those of the
-# checkpoint report that stages 4, 5 and 7 will reuse. Later asked for (20
-# October 2026, decision 19 of docs/build_plan.md): the boosting grid extended
-# as the rule Grid edges of the checkpoint called for.
+# checkpoint report that stages 4, 5 and 7 will reuse. Later asked for (21
+# October 2026, decision 19 of docs/build_plan.md, "Apply"; prepared on 20
+# October before Yu's answer): the boosting grid extended as the rule Grid
+# edges of the checkpoint called for, with the report of grid edges read on
+# the grid its inputs were made on.
 """Code used by more than one notebook (Requirement 4.9).
 
 Every notebook imports this module in its first code cell, before pandas,
@@ -98,7 +100,7 @@ RF_MAX_FEATURES = (1.0, 3)  # 1.0 means all eight predictors, 3 means three
 RF_MIN_LEAF = (1, 5, 20)
 # Decision 19: the checkpoint's rule Grid edges added depth 7 (in quick mode
 # too) and, in the full run, 750 and 1,000 trees with GBM_MAX_TREES 1,000. The
-# first run of part 1 had depths 1 to 5 and at most 500 trees.
+# first run of part 1 had depths 1, 2, 3 and 5 and at most 500 trees.
 GBM_MAX_TREES = 100 if QUICK else 1000
 GBM_TREE_COUNTS = (25, 50, 100) if QUICK else (25, 50, 100, 200, 300, 400, 500, 750, 1000)
 GBM_DEPTHS = (1, 2, 3, 5, 7)
@@ -929,32 +931,24 @@ def crossings(gap_table):
     return pd.DataFrame(rows)
 
 
-# Grid edges (section 6, Checkpoint): for each setting, its grid in order, and
-# the step beyond the first and the last value, fixed before part 1. None
-# means the grid cannot be extended on that side.
-# The rule has one round only, read on the first run of part 1. That round is
-# done (decision 19), so every step is None from now on: an edge found later,
-# on the rerun of part 1 or in the full run, is reported as a limit of the grid.
-GRID_EDGES_DONE = True
-
-
-def edge_step(text):
-    """The step beyond an edge, or None once the one round of Grid edges is done."""
-    return None if GRID_EDGES_DONE else text
-
-
-EDGE_GRIDS = {
-    ("rf", "rf_features"): {"grid": sorted(rf_features(value) for value in RF_MAX_FEATURES),
-                            "below": edge_step("2 predictors per split"), "above": None},
-    ("rf", "rf_min_leaf"): {"grid": sorted(RF_MIN_LEAF), "below": None,
-                            "above": edge_step("min_samples_leaf 50")},
-    ("gbm", "gbm_depth"): {"grid": sorted(GBM_DEPTHS), "below": None, "above": edge_step("depth 7")},
-    ("gbm", "gbm_trees"): {"grid": sorted(GBM_TREE_COUNTS), "below": edge_step("10 trees (staged, no extra fit)"),
-                           "above": edge_step("750 and 1,000 trees, with GBM_MAX_TREES 1,000")},
+# Grid edges (section 6, Checkpoint): the step beyond the first and the last
+# value of each setting's grid, fixed before part 1. None means the grid cannot
+# be extended on that side. The rule has one round, read on the first run of
+# part 1, and decision 19 applied it. On the rerun of part 1 and later, an edge
+# on a side that could be extended is reported as a limit of the grid, with no
+# step.
+EDGE_STEPS = {
+    ("rf", "rf_features"): {"below": "2 predictors per split", "above": None},
+    ("rf", "rf_min_leaf"): {"below": None, "above": "min_samples_leaf 50"},
+    ("gbm", "gbm_depth"): {"below": None, "above": "depth 7"},
+    ("gbm", "gbm_trees"): {"below": "10 trees (staged, no extra fit)",
+                           "above": "750 and 1,000 trees, with GBM_MAX_TREES 1,000"},
 }
+CANNOT_EXTEND = "cannot be extended"
+GRID_LIMIT = "limit of the grid (the one round of Grid edges is done, decision 19)"
 
 
-def edges(runs, summary, tuned):
+def edges(runs, summary, tuned, first_round):
     """Whether each tuned setting sits at an edge of its grid (checkpoint item 5, rule Grid edges).
 
     A tuned setting is at an edge when its value is the first or the last of
@@ -962,13 +956,19 @@ def edges(runs, summary, tuned):
     configuration with the next value inside the grid, the model's other
     setting held at its tuned value, by more than twice the paired standard
     error. A tie is never an edge.
+
+    Each grid is the one the inputs were made on (the values in summary), not
+    the one in the parameters above, so the report on the first run of part 1
+    reads the same after decision 19 widened the grid. first_round is True only
+    for the first run of part 1, the one round of the rule: only then does an
+    edge get its step beyond.
     """
     rows = []
     for _, chosen in tuned.iterrows():
-        for (model, setting), edge in EDGE_GRIDS.items():
+        for (model, setting), steps in EDGE_STEPS.items():
             if chosen["model"] != model:
                 continue
-            grid = edge["grid"]
+            grid = sorted(int(value) for value in summary.loc[summary["model"] == model, setting].dropna().unique())
             value = int(chosen[setting])
             if value not in (grid[0], grid[-1]) or len(grid) < 2:
                 continue
@@ -992,12 +992,21 @@ def edges(runs, summary, tuned):
                 "size": chosen["size"], "model": model, "setting": setting, "tuned_value": value,
                 "side": side, "neighbour_value": neighbour_value, "neighbour_config": neighbour["config"].item(),
                 "neighbour_minus_tuned": difference, "se": se, "at_edge": at_edge,
-                "extension": (edge[side] or "cannot be extended") if at_edge else "",
+                "extension": edge_extension(at_edge, steps[side], first_round),
             })
     # The columns are named even when no tuned setting is at either end of its grid.
     columns = ["size", "model", "setting", "tuned_value", "side", "neighbour_value", "neighbour_config",
                "neighbour_minus_tuned", "se", "at_edge", "extension"]
     return pd.DataFrame(rows, columns=columns)
+
+
+def edge_extension(at_edge, step, first_round):
+    """What the last column of item 5 says about an edge: its step, that the grid cannot be extended, or a limit."""
+    if not at_edge:
+        return ""
+    if step is None:
+        return CANNOT_EXTEND
+    return step if first_round else GRID_LIMIT
 
 
 def deviance_by_group(runs, lines):
