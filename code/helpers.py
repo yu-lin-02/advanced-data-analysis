@@ -17,7 +17,7 @@
 # the grid its inputs were made on. Later asked for (21 October 2026, decision
 # 20 of docs/build_plan.md, "Add it"): the ridge line, a ridge-penalised ppml
 # whose penalty is chosen by cross-validation inside each training sample,
-# fitted on every draw from the full run of stage 3 on.
+# fitted on every draw from the full run of stage 3 on, and never in part 1.
 """Code used by more than one notebook (Requirement 4.9).
 
 Every notebook imports this module in its first code cell, before pandas,
@@ -116,8 +116,9 @@ MIN_FLOW = None  # decision 3: no floor, every recorded flow is kept
 NOISE_VAR = 1.0  # decision 5
 # Decisions 15, 18 and 20: a ridge-penalised ppml as a third reference line,
 # which Yu added at the checkpoint (section 6 of the build plan, Ridge line). Its
-# penalty grid was fixed before part 1. Part 1 ran with RIDGE_LINE False, so no
-# file of part 1 has a ridge row.
+# penalty grid was fixed before part 1. Both runs of part 1 were made while
+# this switch was still False, and FIT_RIDGE below keeps part 1 without the
+# ridge line, so no file of part 1 has a ridge row.
 RIDGE_LINE = True
 RIDGE_ALPHAS = (0.0001, 0.001, 0.01, 0.1, 1, 10)
 N_JOBS = int(os.environ.get("ADA_JOBS", "1"))  # decision 6
@@ -131,6 +132,10 @@ _part = os.environ.get("ADA_PART")
 if _part not in (None, "1"):
     raise ValueError(f"ADA_PART is {_part!r}: it can only be 1, or unset to run every size.")
 PART = None if _part is None else int(_part)
+# The ridge line is fitted only outside part 1, so that no file of part 1 ever
+# has a ridge row (decision 20), even if part 1 is run again under the
+# checkpoint's rule Bugs.
+FIT_RIDGE = RIDGE_LINE and PART is None
 
 # The checkpoint report (section 6 of the plan) reads the two files of part 1
 # from checkpoint/inputs/ and writes its report next to them. If the checkpoint
@@ -219,7 +224,7 @@ def model_configurations():
                                    "gbm_depth": depth, "gbm_trees": trees})
     configurations.append({"model": "mean", "config": "mean"})
     configurations.append({"model": "tree", "config": "tree"})
-    if RIDGE_LINE:
+    if FIT_RIDGE:
         configurations.append({"model": "ridge", "config": "ridge"})
     return configurations
 
@@ -227,18 +232,20 @@ def model_configurations():
 CONFIGURATIONS = model_configurations()
 # The three groups of test rows whose deviance stage 3 records separately.
 GROUP_NAMES = ("top1", "next9", "rest")
-# The columns of dev_runs.csv, in order (stage 3 step 5). The coefficient and
-# ones_ columns are filled on the ppml rows only (decision 14), and ridge_alpha,
-# the penalty that cross-validation chose on the draw, on the ridge rows only.
+# The columns of dev_runs.csv, in order (stage 3 step 5). lbfgs_fallback,
+# train_total_ratio and the coef_ and ones_ columns are filled on the ppml rows
+# only (decision 14). ridge_alpha, the penalty that cross-validation chose on
+# the draw, is filled on the ridge rows only; it comes last, so the columns
+# before it are in the same places as in the files of part 1.
 RUN_COLUMNS = (
     ["variant", "year", "split", "size", "draw", "model", "config",
      "rf_features", "rf_min_leaf", "gbm_depth", "gbm_trees",
      "test_deviance", "d2", "mae_rel", "rmse_rel", "train_deviance"]
     + [f"deviance_{name}" for name in GROUP_NAMES]
-    + ["max_pred_ratio", "seconds", "constant_columns", "lbfgs_fallback", "ridge_alpha", "train_total_ratio",
-       "coef_intercept"]
+    + ["max_pred_ratio", "seconds", "constant_columns", "lbfgs_fallback", "train_total_ratio", "coef_intercept"]
     + [f"coef_{name}" for name in PREDICTORS]
     + [f"ones_{name}" for name in INDICATORS]
+    + ["ridge_alpha"]
 )
 # Columns that hold whole numbers but are empty on some rows. pandas would
 # write them as 8.0; the type Int64 writes 8, and an empty field where missing.
@@ -391,14 +398,17 @@ def fit_ridge_once(alpha, X_fit, y_fit, X_other):
     kept = [j for j in range(X_fit.shape[1]) if X_fit[:, j].min() != X_fit[:, j].max()]
     centre = X_fit[:, kept].mean(axis=0)
     spread = X_fit[:, kept].std(axis=0)
+    # The other rows are standardised with the fit rows' mean and spread, as the fit saw them.
+    Z_fit = (X_fit[:, kept] - centre) / spread
+    Z_other = (X_other[:, kept] - centre) / spread
     level = y_fit.mean()
     model = make_ridge(alpha)
     start = time.perf_counter()
-    model.fit((X_fit[:, kept] - centre) / spread, y_fit / level)
+    model.fit(Z_fit, y_fit / level)
     seconds = time.perf_counter() - start
     return {
-        "other_predicted": level * model.predict((X_other[:, kept] - centre) / spread),
-        "fit_predicted": level * model.predict((X_fit[:, kept] - centre) / spread),
+        "other_predicted": level * model.predict(Z_other),
+        "fit_predicted": level * model.predict(Z_fit),
         "seconds": seconds,
     }
 
@@ -412,12 +422,14 @@ def fit_ridge(X_train, y_train, pair_train, X_test, year, split_id, n, draw):
     value, the simpler model. The folds keep both directions of a pair
     together, as the test split does: the distinct pair_id values of the
     sample, sorted, are permuted with rng("cv", year, split_id, n, draw) and
-    dealt to the folds in turn. The test rows are not used. The ridge line is
-    then refitted on the whole sample at the chosen value: 31 fits in all,
-    whose seconds are summed.
+    dealt to the folds in turn. The test rows play no part in choosing the
+    penalty. The ridge line is then refitted on the whole sample at the chosen
+    value, and only this refit predicts the test rows: 31 fits in all, whose
+    seconds are summed.
     """
     # np.unique returns the distinct values sorted.
     permuted = rng("cv", year, split_id, n, draw).permutation(np.unique(pair_train))
+    # Dealt in turn: the pair in place i goes to fold i mod 5 (0, 1, 2, 3, 4, 0, 1, ...).
     fold_of_pair = {pair: i % CV_FOLDS for i, pair in enumerate(permuted)}
     folds = np.array([fold_of_pair[pair] for pair in pair_train])
     seconds = 0.0
@@ -448,7 +460,7 @@ def run_draw(X_pool, y_pool, pair_pool, X_test, y_test, year, split_id, n, draw)
     The sample is drawn with rng("draw", year, split_id, n, draw) and every
     model gets the same random_state, seed_int("model", year, split_id, n,
     draw), so a draw gives the same numbers whichever worker runs it. The
-    ridge line (when RIDGE_LINE is True) draws its folds from rng("cv", ...)
+    ridge line (when FIT_RIDGE is True) draws its folds from rng("cv", ...)
     and the pair_id values of the sample (pair_pool holds those of the pool),
     so it changes no random number of the other models. Returns, in the order
     of CONFIGURATIONS, the test predictions, the mean Poisson deviance on the
@@ -515,7 +527,7 @@ def run_draw(X_pool, y_pool, pair_pool, X_test, y_test, year, split_id, n, draw)
     train_deviance["tree"] = np.nan
 
     ridge = None
-    if RIDGE_LINE:
+    if FIT_RIDGE:
         ridge = fit_ridge(X_train, y_train, pair_pool[positions], X_test, year, split_id, n, draw)
         seconds["ridge"] = ridge["seconds"]
         test_predicted["ridge"] = ridge["test_predicted"]
@@ -712,7 +724,9 @@ def largest_relative_difference(new, old, keys, skip=("seconds",)):
 # ---------------------------------------------------------------------------
 
 # The lines of the learning curves and of the checkpoint tables: the three
-# candidates (rf and gbm at their tuned setting) and the two reference lines.
+# candidates (rf and gbm at their tuned setting) and the reference lines mean
+# and tree. Part 1 has no ridge rows, so the checkpoint leaves out the third
+# reference line, ridge (decision 20); stage 7 adds it to its learning curves.
 CANDIDATES = ("ppml", "rf", "gbm")
 LINES = CANDIDATES + ("mean", "tree")
 SETTING_COLUMNS = ["rf_features", "rf_min_leaf", "gbm_depth", "gbm_trees"]

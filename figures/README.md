@@ -1,6 +1,6 @@
 # Figures
 
-<!-- Drafted with Claude (Anthropic). Asked for: a note stating the rule for this folder. Later asked for (18 October 2026, section 5 of docs/build_plan.md): the files stage 7 will write. Later asked for (21 October 2026, decision 19 of the build plan): the checkpoint report on the rerun of part 1. -->
+<!-- Drafted with Claude (Anthropic). Asked for: a note stating the rule for this folder. Later asked for (18 October 2026, section 5 of docs/build_plan.md): the files stage 7 will write. Later asked for (21 October 2026, decision 19 of the build plan): the checkpoint report on the rerun of part 1. Later asked for (21 October 2026, decision 20 of the build plan): the ridge line in the learning curves. -->
 
 Every file in this folder is written by `code/07_figures.ipynb` (Requirement 4.11). Nothing is added by hand. Figures are saved as `.pdf`, tables as `.csv` and `.tex` (decision 7 of `docs/build_plan.md`).
 
@@ -15,7 +15,7 @@ TODO, with stage 7: one line per file. The plan (section 6, stage 7) lists:
 | `tab_selection` | The size rule against cross-validated selection in the analysis year |
 | `tab_selection_confusion` | The model each selector picked against the model that won, over all sizes |
 | `tab_checks` | The checks of stage 6 |
-| `learning_curves` | Test and training deviance of the five models by training size |
+| `learning_curves` | Test and training deviance of the five lines (`ppml`, tuned `rf`, tuned `gbm`, `mean`, `tree`) and of `ridge`, added at the checkpoint (decision 20), by training size |
 | `components` | Variance and remainder of the three models by training size |
 | `gaps` | Bias gap and variance gap, with the cutoff and its interval |
 | `analysis_methods` | The three models, the size rule, cross-validated selection and the best of the three in the analysis year |
