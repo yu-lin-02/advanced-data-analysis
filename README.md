@@ -1,6 +1,6 @@
 # Semester project: Advanced Data Analysis, HEC Lausanne, autumn 2026
 
-<!-- Outline drafted with Claude (Anthropic). Asked for: a README skeleton in the order given in the course document "Starting and Shipping Your Project". Later asked for (18 October 2026, section 5 of docs/build_plan.md): the seven stages of the build plan and their files. Later asked for (20 October 2026, step 2 of section 10 of the build plan): how to run the checkpoint report. -->
+<!-- Outline drafted with Claude (Anthropic). Asked for: a README skeleton in the order given in the course document "Starting and Shipping Your Project". Later asked for (18 October 2026, section 5 of docs/build_plan.md): the seven stages of the build plan and their files. Later asked for (20 October 2026, step 2 of section 10 of the build plan): how to run the checkpoint report. Later asked for (20 October 2026, step 4 of section 10 of the build plan): the date the checkpoint report was run. -->
 
 ## What this project does
 
@@ -44,7 +44,7 @@ Other ways to run it:
 | 6 | `code/06_checks.ipynb` | Repeats the development-year experiment with added noise, with another test split and with twice the trees. |
 | 7 | `code/07_figures.ipynb` | Makes every figure and table shown in the paper, in `figures/`. |
 
-`code/03b_checkpoint.ipynb` is not in the order of a full run. It was run once, between part 1 and the full run of stage 3, to review the results of the training sizes up to 1,000 under rules fixed in advance (section 6 of [`docs/build_plan.md`](docs/build_plan.md)). TODO: the date it was run. Quick mode runs it after stage 3, so that every push tests it.
+`code/03b_checkpoint.ipynb` is not in the order of a full run. It was run once, between part 1 and the full run of stage 3, to review the results of the training sizes up to 1,000 under rules fixed in advance (section 6 of [`docs/build_plan.md`](docs/build_plan.md)). It was run on 20 October 2026, on the files of part 1 copied into `results/checkpoint/inputs/`. Quick mode runs it after stage 3, so that every push tests it.
 
 `code/helpers.py` holds what more than one notebook uses. [`docs/build_plan.md`](docs/build_plan.md) describes every stage in detail.
 
