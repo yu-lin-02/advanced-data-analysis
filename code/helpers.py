@@ -1256,13 +1256,13 @@ SIZE_RULE_COLUMNS = ["size", "model", "config", "rf_features", "rf_min_leaf", "g
 
 
 def gbm_extremes(runs):
-    """By size, how close gbm came to the two thresholds of the rule Stability, and how many draws crossed one.
+    """By size, how close gbm came to the two thresholds of the rule Stability, and how many gbm rows crossed one.
 
     The largest test deviance of a gbm configuration divided by that of mean on
     the same sample (the threshold is 10), the largest test prediction divided
     by the largest training flow (the threshold is 1,000), and the number of
-    gbm rows that divergences flags. Stage 4 step 0 reads it on the sizes above
-    CHECKPOINT_MAX.
+    gbm rows (one configuration on one draw) that divergences flags. Stage 4
+    step 0 reads it on the sizes above CHECKPOINT_MAX.
     """
     mean_draws = runs[runs["config"] == "mean"][["size", "draw", "test_deviance"]]
     gbm = runs[runs["model"] == "gbm"].merge(mean_draws, on=["size", "draw"], suffixes=("", "_mean"))
@@ -1274,7 +1274,9 @@ def gbm_extremes(runs):
                      "largest_ratio_to_mean": at_size["ratio_to_mean"].max(),
                      "largest_max_pred_ratio": at_size["max_pred_ratio"].max(),
                      "divergences": int((diverged["size"] == size).sum())})
-    return pd.DataFrame(rows)
+    # The columns are named so that a table with no size still has them.
+    return pd.DataFrame(rows, columns=["size", "gbm_rows", "largest_ratio_to_mean", "largest_max_pred_ratio",
+                                       "divergences"])
 
 
 def edge_note(edge_table, size, model):
@@ -1288,9 +1290,11 @@ def size_rule_table(summary, tuned, runs):
     """size_rule.csv: at each size, ppml, tuned rf and tuned gbm, and the one the size rule chooses (stage 4 step 3).
 
     Each row has the model's tuned setting (none for ppml), its mean test
-    deviance with its standard error and its median (step 1), and whether the
-    size rule chooses it. For rf and gbm, edges lists the settings that sit at
-    an edge of their grid as the checkpoint defines it (item 5). The one round
+    deviance with its standard error and its median (step 1), se_unreliable
+    (one draw holds more than half of the sum over draws, so the standard error
+    is unreliable), and whether the size rule chooses it. For rf and gbm, edges
+    lists the settings that sit at an edge of their grid as the checkpoint
+    defines it (item 5). The one round
     of the rule Grid edges is done (decision 19), so an edge is reported, not
     extended: "cannot be extended" or "limit of the grid".
     """
@@ -1319,6 +1323,7 @@ def gaps_with_wins(gap_table, wins):
     same training sample (decision 12). A tie is not a win.
     """
     table = gap_table.merge(wins[["size", "draws", "ppml_beats_rf", "ppml_beats_gbm", "ppml_beats_best"]], on="size")
+    # Each row takes the win count of its own comparison.
     table["ppml_wins"] = [row[f"ppml_beats_{row['comparison']}"] for _, row in table.iterrows()]
     return table.drop(columns=["ppml_beats_rf", "ppml_beats_gbm", "ppml_beats_best"])
 
@@ -1377,7 +1382,11 @@ def resample_gaps(matrices, positions):
 
 
 def check_resampling(matrices, tuned, gap_table):
-    """Before the bootstrap: on every draw once, resample_gaps must give the tuned settings of tune and the gaps of gaps."""
+    """Before the bootstrap: on every draw once, resample_gaps must give the tuned settings and error gaps of steps 2 and 4.
+
+    The error gaps are compared to a relative 1e-9 of the errors: the two add up
+    the same draws in a different order, so they can differ in the last digits.
+    """
     every_draw = {n: np.arange(len(matrix)) for n, (matrix, _) in matrices.items()}
     again = resample_gaps(matrices, every_draw)
     for row in again.itertuples():
@@ -1402,10 +1411,11 @@ def bootstrap_crossings(matrices, year, split_id, resamples):
     """find_crossing on resampled draws, for each comparison (stage 4 step 6).
 
     matrices comes from candidate_matrices. In resample b, at each size n
-    separately, as many draws as there are are drawn with replacement with
-    rng("bootstrap", year, split_id, n, b), and every configuration uses the
-    same drawn draws. Inside the resample rf and gbm are tuned again and the
-    error gaps recomputed (resample_gaps), then find_crossing reads them. The
+    separately, the draws of that size are drawn again with replacement, as many
+    as there are, with rng("bootstrap", year, split_id, n, b), and every
+    configuration uses the same drawn draws. Inside the resample rf and gbm are
+    tuned again and the error gaps recomputed (resample_gaps), then
+    find_crossing reads them. The
     bias and variance gaps are not resampled: they need each draw's
     predictions, which are not saved.
 
