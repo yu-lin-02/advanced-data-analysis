@@ -18,6 +18,10 @@
 # 20 of docs/build_plan.md, "Add it"): the ridge line, a ridge-penalised ppml
 # whose penalty is chosen by cross-validation inside each training sample,
 # fitted on every draw from the full run of stage 3 on, and never in part 1.
+# Later asked for (22 October 2026, step 6 of section 10 of docs/build_plan.md):
+# the functions of stage 4 (the test of the rule Stability after the full run
+# of stage 3, the table of the size rule, the gaps with the win counts of
+# ppml, and the bootstrap of the cutoff).
 """Code used by more than one notebook (Requirement 4.9).
 
 Every notebook imports this module in its first code cell, before pandas,
@@ -1236,3 +1240,224 @@ def thin_indicators(runs):
                          "draws_with_1_to_3": int(ones.between(1, 3).sum()),
                          "median_ones": ones.median()})
     return pd.DataFrame(rows)
+
+
+# ---------------------------------------------------------------------------
+# Stage 4: the size rule, the gaps and the cutoff (section 6 of the plan)
+# ---------------------------------------------------------------------------
+
+# The three comparisons of stage 4 step 4, and the six patterns find_crossing
+# can return (section 7, decision 12).
+COMPARISONS = ("rf", "gbm", "best")
+PATTERNS = ("one_crossing", "reversal", "reversal_then_crossing", "never_overtaken", "never_ahead", "several")
+# The columns of size_rule.csv, in order (stage 4 step 3).
+SIZE_RULE_COLUMNS = ["size", "model", "config", "rf_features", "rf_min_leaf", "gbm_depth", "gbm_trees",
+                     "draws", "mean", "se", "se_unreliable", "median", "chosen", "edges"]
+
+
+def gbm_extremes(runs):
+    """By size, how close gbm came to the two thresholds of the rule Stability, and how many draws crossed one.
+
+    The largest test deviance of a gbm configuration divided by that of mean on
+    the same sample (the threshold is 10), the largest test prediction divided
+    by the largest training flow (the threshold is 1,000), and the number of
+    gbm rows that divergences flags. Stage 4 step 0 reads it on the sizes above
+    CHECKPOINT_MAX.
+    """
+    mean_draws = runs[runs["config"] == "mean"][["size", "draw", "test_deviance"]]
+    gbm = runs[runs["model"] == "gbm"].merge(mean_draws, on=["size", "draw"], suffixes=("", "_mean"))
+    gbm["ratio_to_mean"] = gbm["test_deviance"] / gbm["test_deviance_mean"]
+    diverged = divergences(runs)
+    rows = []
+    for size, at_size in gbm.groupby("size"):
+        rows.append({"size": size, "gbm_rows": len(at_size),
+                     "largest_ratio_to_mean": at_size["ratio_to_mean"].max(),
+                     "largest_max_pred_ratio": at_size["max_pred_ratio"].max(),
+                     "divergences": int((diverged["size"] == size).sum())})
+    return pd.DataFrame(rows)
+
+
+def edge_note(edge_table, size, model):
+    """The settings of a tuned model that sit at an edge of their grid at one size, in words; empty if none."""
+    at_size = edge_table[(edge_table["size"] == size) & (edge_table["model"] == model)]
+    notes = [f"{row.setting} {row.side}: {row.extension}" for row in at_size.itertuples() if row.at_edge]
+    return "; ".join(notes)
+
+
+def size_rule_table(summary, tuned, runs):
+    """size_rule.csv: at each size, ppml, tuned rf and tuned gbm, and the one the size rule chooses (stage 4 step 3).
+
+    Each row has the model's tuned setting (none for ppml), its mean test
+    deviance with its standard error and its median (step 1), and whether the
+    size rule chooses it. For rf and gbm, edges lists the settings that sit at
+    an edge of their grid as the checkpoint defines it (item 5). The one round
+    of the rule Grid edges is done (decision 19), so an edge is reported, not
+    extended: "cannot be extended" or "limit of the grid".
+    """
+    lines = line_configs(tuned)
+    candidates = lines[lines["line"].isin(CANDIDATES)]
+    table = candidates.merge(summary, on=["size", "config"])
+    picks = size_rule(summary, lines).rename(columns={"chosen": "chosen_model"})
+    table = table.merge(picks, on="size")
+    table["chosen"] = table["model"] == table["chosen_model"]
+    edge_table = edges(runs, summary, tuned, first_round=False)
+    table["edges"] = [edge_note(edge_table, row.size, row.model) for row in table.itertuples()]
+    # Rows in the order ppml, rf, gbm at each size.
+    table["order"] = [CANDIDATES.index(model) for model in table["model"]]
+    table = table.sort_values(["size", "order"]).reset_index(drop=True)
+    table = table[SIZE_RULE_COLUMNS]
+    for column in SETTING_COLUMNS:
+        table[column] = table[column].astype("Int64")
+    return table
+
+
+def gaps_with_wins(gap_table, wins):
+    """gaps.csv: the gaps of stage 4 step 4, with the draws in which ppml has the lower test deviance (step 1).
+
+    wins comes from ppml_wins. For each comparison, ppml_wins is the number of
+    draws, out of draws, in which ppml beats that comparison's ensemble on the
+    same training sample (decision 12). A tie is not a win.
+    """
+    table = gap_table.merge(wins[["size", "draws", "ppml_beats_rf", "ppml_beats_gbm", "ppml_beats_best"]], on="size")
+    table["ppml_wins"] = [row[f"ppml_beats_{row['comparison']}"] for _, row in table.iterrows()]
+    return table.drop(columns=["ppml_beats_rf", "ppml_beats_gbm", "ppml_beats_best"])
+
+
+def candidate_matrix(runs, n):
+    """At size n, the test deviance of every candidate configuration on every draw (stage 4 step 6).
+
+    Returns the matrix, one row per draw in the order of the draws and one
+    column per configuration, and a table naming the model and configuration of
+    each column. ppml comes first. Within rf and within gbm the columns are in
+    the order of the tie-break of tune (rf: larger min_samples_leaf, then fewer
+    predictors per split; gbm: smaller depth, then fewer trees), so the first
+    column with the lowest mean is the one tune picks.
+    """
+    at_size = runs[(runs["size"] == n) & runs["model"].isin(CANDIDATES)]
+    configs = at_size.drop_duplicates("config")[["model", "config"] + SETTING_COLUMNS]
+    ppml = configs[configs["model"] == "ppml"]
+    rf = configs[configs["model"] == "rf"].sort_values(["rf_min_leaf", "rf_features"], ascending=[False, True])
+    gbm = configs[configs["model"] == "gbm"].sort_values(["gbm_depth", "gbm_trees"])
+    columns = pd.concat([ppml, rf, gbm]).reset_index(drop=True)
+    wide = at_size.pivot(index="draw", columns="config", values="test_deviance").sort_index()
+    matrix = wide[list(columns["config"])].to_numpy()
+    assert np.isfinite(matrix).all(), f"Some candidate is missing a draw at size {n}."
+    return matrix, columns
+
+
+def resample_gaps(matrices, positions):
+    """The error gaps of ppml at every size, on one set of draws, with the ensembles tuned on those draws.
+
+    matrices maps each size to what candidate_matrix returns. positions maps
+    each size to the rows of its matrix to use: a resample of the draws, in
+    which a draw can come more than once, or every draw once. At each size the
+    mean test deviance of every configuration is taken over those rows, rf and
+    gbm are tuned again (the lowest mean, ties as in tune), the better of the
+    two is the ensemble of the best comparison (a tie goes to rf, as in
+    better_ensemble), and the error gap is E(ppml) - E(c) for each comparison.
+    """
+    rows = []
+    for n, (matrix, columns) in matrices.items():
+        means = matrix[positions[n]].mean(axis=0)
+        row = {"size": n}
+        ppml_mean = means[np.flatnonzero(columns["model"] == "ppml")[0]]
+        tuned_means = {}
+        for model in ("rf", "gbm"):
+            where = np.flatnonzero(columns["model"] == model)
+            # argmin returns the first of equal values, so a tie goes to the simpler setting.
+            column = where[np.argmin(means[where])]
+            row[f"{model}_config"] = columns["config"][column]
+            tuned_means[model] = means[column]
+        row["best"] = "rf" if tuned_means["rf"] <= tuned_means["gbm"] else "gbm"
+        tuned_means["best"] = tuned_means[row["best"]]
+        for comparison in COMPARISONS:
+            row[f"gap_{comparison}"] = ppml_mean - tuned_means[comparison]
+        rows.append(row)
+    return pd.DataFrame(rows)
+
+
+def check_resampling(matrices, tuned, gap_table):
+    """Before the bootstrap: on every draw once, resample_gaps must give the tuned settings of tune and the gaps of gaps."""
+    every_draw = {n: np.arange(len(matrix)) for n, (matrix, _) in matrices.items()}
+    again = resample_gaps(matrices, every_draw)
+    for row in again.itertuples():
+        for model in ("rf", "gbm"):
+            expected = tuned.loc[(tuned["size"] == row.size) & (tuned["model"] == model), "config"].item()
+            assert getattr(row, f"{model}_config") == expected, \
+                f"The bootstrap tunes {model} differently from tune at size {row.size}."
+        for comparison in COMPARISONS:
+            expected = gap_table.loc[(gap_table["size"] == row.size) & (gap_table["comparison"] == comparison)].iloc[0]
+            scale = max(abs(expected["error_ppml"]), abs(expected["error_other"]))
+            assert abs(getattr(row, f"gap_{comparison}") - expected["error_gap"]) <= 1e-9 * scale, \
+                f"The bootstrap's error gap differs from gaps at size {row.size}, {comparison}."
+
+
+def candidate_matrices(runs):
+    """candidate_matrix at every size of runs, from the smallest size up."""
+    sizes = sorted(int(n) for n in runs["size"].unique())
+    return {n: candidate_matrix(runs, n) for n in sizes}
+
+
+def bootstrap_crossings(matrices, year, split_id, resamples):
+    """find_crossing on resampled draws, for each comparison (stage 4 step 6).
+
+    matrices comes from candidate_matrices. In resample b, at each size n
+    separately, as many draws as there are are drawn with replacement with
+    rng("bootstrap", year, split_id, n, b), and every configuration uses the
+    same drawn draws. Inside the resample rf and gbm are tuned again and the
+    error gaps recomputed (resample_gaps), then find_crossing reads them. The
+    bias and variance gaps are not resampled: they need each draw's
+    predictions, which are not saved.
+
+    Returns one row per resample and comparison with its pattern, n_star and
+    last_crossing.
+    """
+    rows = []
+    for resample in range(resamples):
+        positions = {}
+        for n, (matrix, _) in matrices.items():
+            draws = len(matrix)
+            positions[n] = rng("bootstrap", year, split_id, n, resample).integers(0, draws, size=draws)
+        resampled = resample_gaps(matrices, positions)
+        for comparison in COMPARISONS:
+            result = find_crossing(resampled["size"], resampled[f"gap_{comparison}"])
+            rows.append({"resample": resample, "comparison": comparison, "pattern": result["pattern"],
+                         "n_star": result["n_star"], "last_crossing": result["last_crossing"]})
+    return pd.DataFrame(rows)
+
+
+def interval(values):
+    """The 2.5 and 97.5 percentiles of values, or two empty values if there are none."""
+    if len(values) == 0:
+        return np.nan, np.nan
+    low, high = np.percentile(values, [2.5, 97.5])
+    return float(low), float(high)
+
+
+def cutoff_table(crossing_table, resampled):
+    """cutoff.csv: the pattern and n* of each comparison (stage 4 step 5), with the bootstrap of step 6 beside them.
+
+    crossing_table comes from crossings, resampled from bootstrap_crossings.
+    For each comparison: the share of resamples in each pattern; the 2.5 and
+    97.5 percentiles of n_star over the resamples with one_crossing, and of
+    last_crossing over the resamples with reversal_then_crossing (decision 12),
+    each with the number of resamples it rests on.
+    """
+    rows = []
+    for _, point in crossing_table.iterrows():
+        of_comparison = resampled[resampled["comparison"] == point["comparison"]]
+        row = point.to_dict()
+        row["resamples"] = len(of_comparison)
+        for pattern in PATTERNS:
+            row[f"share_{pattern}"] = float((of_comparison["pattern"] == pattern).mean())
+        one = of_comparison.loc[of_comparison["pattern"] == "one_crossing", "n_star"]
+        row["resamples_one_crossing"] = len(one)
+        row["n_star_low"], row["n_star_high"] = interval(one)
+        back = of_comparison.loc[of_comparison["pattern"] == "reversal_then_crossing", "last_crossing"]
+        row["resamples_reversal_then_crossing"] = len(back)
+        row["last_crossing_low"], row["last_crossing_high"] = interval(back)
+        rows.append(row)
+    table = pd.DataFrame(rows)
+    for column in ["crossing_from", "crossing_to"]:
+        table[column] = table[column].astype("Int64")
+    return table
