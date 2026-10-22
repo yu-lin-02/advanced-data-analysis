@@ -21,7 +21,13 @@
 # Later asked for (22 October 2026, step 6 of section 10 of docs/build_plan.md):
 # the functions of stage 4 (the test of the rule Stability after the full run
 # of stage 3, the table of the size rule, the gaps with the win counts of
-# ppml, and the bootstrap of the cutoff).
+# ppml, and the bootstrap of the cutoff). Later asked for (22 October 2026,
+# step 7 of section 10 of docs/build_plan.md, after the freeze of decision 21):
+# the functions of stage 5 (the fits at the frozen settings, cross-validated
+# selection on the folds of the ridge line, the summary with the test of H2,
+# the cutoff of H1 and of decision 22 with its bootstrap, and the selection
+# table), with the folds of the ridge line moved into their own function and
+# forests that can be fitted without out-of-bag predictions.
 """Code used by more than one notebook (Requirement 4.9).
 
 Every notebook imports this module in its first code cell, before pandas,
@@ -320,14 +326,15 @@ def make_ridge(alpha):
     return PoissonRegressor(alpha=alpha, solver="newton-cholesky")
 
 
-def make_rf(max_features, min_leaf, seed):
+def make_rf(max_features, min_leaf, seed, oob=True):
     """A random forest with the Poisson loss, fitted on one thread.
 
-    oob_score=True keeps the out-of-bag predictions for the training deviance.
-    It leaves the predictions unchanged.
+    oob_score=True keeps the out-of-bag predictions for the training deviance
+    of stage 3. It leaves the predictions unchanged, so stage 5, which records
+    no training deviance, fits its forests with oob=False and times the fit alone.
     """
     return RandomForestRegressor(n_estimators=RF_TREES, criterion="poisson", max_features=max_features,
-                                 min_samples_leaf=min_leaf, oob_score=True, n_jobs=1, random_state=seed)
+                                 min_samples_leaf=min_leaf, oob_score=oob, n_jobs=1, random_state=seed)
 
 
 def make_gbm(depth, seed, trees=GBM_MAX_TREES):
@@ -417,6 +424,22 @@ def fit_ridge_once(alpha, X_fit, y_fit, X_other):
     }
 
 
+def cv_folds(pair_train, year, split_id, n, draw):
+    """The fold, from 0 to CV_FOLDS - 1, of each row of one training sample.
+
+    The folds keep both directions of a pair together, as the test split does:
+    the distinct pair_id values of the sample, sorted, are permuted with
+    rng("cv", year, split_id, n, draw) and dealt to the folds in turn (section
+    6, Ridge line). The ridge line and cv_select (stage 5) use the same folds
+    on the same sample.
+    """
+    # np.unique returns the distinct values sorted.
+    permuted = rng("cv", year, split_id, n, draw).permutation(np.unique(pair_train))
+    # Dealt in turn: the pair in place i goes to fold i mod 5 (0, 1, 2, 3, 4, 0, 1, ...).
+    fold_of_pair = {pair: i % CV_FOLDS for i, pair in enumerate(permuted)}
+    return np.array([fold_of_pair[pair] for pair in pair_train])
+
+
 def fit_ridge(X_train, y_train, pair_train, X_test, year, split_id, n, draw):
     """Fit the ridge line on one training sample (section 6, Ridge line; decisions 15, 18 and 20).
 
@@ -424,18 +447,12 @@ def fit_ridge(X_train, y_train, pair_train, X_test, year, split_id, n, draw):
     the value with the lowest mean, over the five folds, of the mean Poisson
     deviance on the validation fold, in thousand USD. A tie goes to the larger
     value, the simpler model. The folds keep both directions of a pair
-    together, as the test split does: the distinct pair_id values of the
-    sample, sorted, are permuted with rng("cv", year, split_id, n, draw) and
-    dealt to the folds in turn. The test rows play no part in choosing the
+    together (cv_folds). The test rows play no part in choosing the
     penalty. The ridge line is then refitted on the whole sample at the chosen
     value, and only this refit predicts the test rows: 31 fits in all, whose
     seconds are summed.
     """
-    # np.unique returns the distinct values sorted.
-    permuted = rng("cv", year, split_id, n, draw).permutation(np.unique(pair_train))
-    # Dealt in turn: the pair in place i goes to fold i mod 5 (0, 1, 2, 3, 4, 0, 1, ...).
-    fold_of_pair = {pair: i % CV_FOLDS for i, pair in enumerate(permuted)}
-    folds = np.array([fold_of_pair[pair] for pair in pair_train])
+    folds = cv_folds(pair_train, year, split_id, n, draw)
     seconds = 0.0
     cv_deviance = {}
     for alpha in RIDGE_ALPHAS:
@@ -1471,3 +1488,521 @@ def cutoff_table(crossing_table, resampled):
     for column in ["crossing_from", "crossing_to"]:
         table[column] = table[column].astype("Int64")
     return table
+
+
+# ---------------------------------------------------------------------------
+# Stage 5: the analysis year at the settings frozen after stage 4 (section 6)
+# ---------------------------------------------------------------------------
+
+# The methods of stage 5, in the order of their rows on each draw (stage 5 steps 1 to 5).
+METHODS = ("ppml", "rf", "gbm", "size_rule", "best_of_three", "cv_select", "ridge")
+# The columns of analysis_runs.csv, in order. constant_columns, lbfgs_fallback
+# and train_total_ratio are filled on the ppml rows only, ridge_alpha on the
+# ridge rows only.
+ANALYSIS_RUN_COLUMNS = ["year", "split", "size", "draw", "method", "model", "config",
+                        "rf_features", "rf_min_leaf", "gbm_depth", "gbm_trees",
+                        "test_deviance", "d2", "mae_rel", "rmse_rel", "seconds", "fits",
+                        "constant_columns", "lbfgs_fallback", "train_total_ratio", "ridge_alpha"]
+ANALYSIS_WHOLE_NUMBER_COLUMNS = ["rf_features", "rf_min_leaf", "gbm_depth", "gbm_trees", "fits",
+                                 "constant_columns", "lbfgs_fallback"]
+# The columns of analysis_summary.csv, in order. The columns after fits are
+# filled on one method's rows only: best and the win counts on ppml, the
+# differences to cv_select (the test of H2) and to best_of_three on size_rule,
+# and the difference to ppml and the win count of ridge on ridge.
+SUMMARY_COLUMNS = ["size", "method", "model", "config", "draws", "mean", "se", "se_unreliable", "median",
+                   "seconds", "fits",
+                   "best", "ppml_beats_rf", "ppml_beats_gbm", "ppml_beats_best",
+                   "minus_cv_select", "se_minus_cv_select", "draws_with_cv_select", "within_2se",
+                   "minus_best_of_three", "se_minus_best_of_three",
+                   "minus_ppml", "se_minus_ppml", "ridge_beats_best"]
+# The two rows of analysis_cutoff.csv: each compares one model with the better
+# of rf and gbm. best is the test of H1; ridge_best is decision 22, reported
+# beside it and not part of it.
+CUTOFF_COMPARISONS = {"best": "ppml", "ridge_best": "ridge"}
+# The models whose draws the bootstrap of analysis_cutoff.csv resamples.
+CUTOFF_MODELS = ("ppml", "rf", "gbm", "ridge")
+# The fits of one draw of cv_select: on each fold one ppml fit, one fit per rf
+# setting and one gbm fit per depth, then the refit (61 with decision 19). The
+# ridge line has one fit per fold and penalty, then the refit (31).
+CV_SELECT_FITS = CV_FOLDS * (1 + len(RF_MAX_FEATURES) * len(RF_MIN_LEAF) + len(GBM_DEPTHS)) + 1
+RIDGE_FITS = CV_FOLDS * len(RIDGE_ALPHAS) + 1
+
+
+def size_rule_lookup(table, n):
+    """The rows of size_rule.csv for the grid size nearest to n on a log scale (section 7).
+
+    Stage 5 runs the sizes of the grid itself, so the nearest size is n. If n
+    were exactly halfway between two sizes on the log scale, the smaller would
+    be taken.
+    """
+    grid = np.array(sorted(table["size"].unique()), dtype=float)
+    nearest = grid[np.argmin(np.abs(np.log(grid) - np.log(n)))]
+    return table[table["size"] == nearest]
+
+
+def rf_max_features(features):
+    """The value of RF_MAX_FEATURES that gives features predictors per split (rf_features in the files: 8 is 1.0)."""
+    for value in RF_MAX_FEATURES:
+        if rf_features(value) == features:
+            return value
+    raise ValueError(f"No value of RF_MAX_FEATURES gives {features} predictors per split.")
+
+
+def frozen_settings(rows):
+    """The settings of ppml, rf and gbm at one size, and the model the size rule chooses, from rows of size_rule.csv.
+
+    Returns a dictionary with one entry per model (its model, config and
+    settings, whole numbers where the setting applies) and the entry chosen.
+    """
+    settings = {}
+    for row in rows.itertuples():
+        setting = {"model": row.model, "config": row.config}
+        for column in SETTING_COLUMNS:
+            value = getattr(row, column)
+            if not pd.isna(value):
+                setting[column] = int(value)
+        settings[row.model] = setting
+    chosen = rows.loc[rows["chosen"], "model"]
+    assert len(chosen) == 1, "size_rule.csv does not choose exactly one model at this size."
+    settings["chosen"] = chosen.item()
+    return settings
+
+
+def candidate_settings():
+    """The candidate configurations as settings, in the order cv_select breaks a tie (stage 5 step 4).
+
+    ppml first, then rf from the larger min_samples_leaf and then the fewer
+    predictors per split, then gbm from the smaller depth and then the fewer
+    trees: the simpler setting first within each model, as in tune, and across
+    models the order of ppml, rf, gbm, as in size_rule.
+    """
+    ppml = [setting for setting in CONFIGURATIONS if setting["model"] == "ppml"]
+    rf = [setting for setting in CONFIGURATIONS if setting["model"] == "rf"]
+    gbm = [setting for setting in CONFIGURATIONS if setting["model"] == "gbm"]
+    # Each setting is sorted on a pair of numbers; the minus sign puts the larger leaf first.
+    rf = sorted(rf, key=lambda setting: (-setting["rf_min_leaf"], setting["rf_features"]))
+    gbm = sorted(gbm, key=lambda setting: (setting["gbm_depth"], setting["gbm_trees"]))
+    return ppml + rf + gbm
+
+
+def fit_setting(setting, X_train, y_train, X_other, seed):
+    """Fit one candidate at one setting on X_train, y_train and predict the rows X_other: one fit.
+
+    gbm is fitted with the number of trees of its setting, rf without
+    out-of-bag predictions. Returns the predictions, the seconds of the fit
+    call and, for ppml, what fit_ppml returns.
+    """
+    if setting["model"] == "ppml":
+        ppml = fit_ppml(X_train, y_train, X_other)
+        return {"predicted": ppml["test_predicted"], "seconds": ppml["seconds"], "ppml": ppml}
+    if setting["model"] == "rf":
+        model = make_rf(rf_max_features(setting["rf_features"]), setting["rf_min_leaf"], seed, oob=False)
+    else:
+        model = make_gbm(setting["gbm_depth"], seed, trees=setting["gbm_trees"])
+    start = time.perf_counter()
+    model.fit(X_train, y_train)
+    seconds = time.perf_counter() - start
+    return {"predicted": model.predict(X_other), "seconds": seconds, "ppml": None}
+
+
+def validation_deviance(y, predicted, where):
+    """The mean Poisson deviance on a validation fold, after checking that every prediction is positive and finite."""
+    assert np.isfinite(predicted).all() and (predicted > 0).all(), \
+        f"A prediction on a validation fold is not positive and finite at {where}. Stop and report."
+    return mean_poisson_deviance(y, predicted)
+
+
+def cv_select(X_train, y_train, pair_train, X_test, year, split_id, n, draw, seed):
+    """Cross-validated selection over the candidate configurations on one training sample (stage 5 step 4).
+
+    The sample is cut into CV_FOLDS folds that keep both directions of a pair
+    together, the same folds as the ridge line (cv_folds). On each fold every
+    candidate is fitted on the other folds and scored by its mean Poisson
+    deviance on the fold: 1 ppml fit, one rf fit for each of its settings, and
+    one gbm fit for each depth, with GBM_MAX_TREES trees, scored at every count
+    of GBM_TREE_COUNTS through staged prediction (section 7). The configuration
+    with the lowest mean over the folds is chosen, a tie going to the first in
+    the order of candidate_settings, and refitted on the whole sample to
+    predict the test rows. The test rows play no part in the choice. Its cost
+    is every fit from the first fold to the refit, with the seconds of each
+    fit call.
+    """
+    folds = cv_folds(pair_train, year, split_id, n, draw)
+    candidates = candidate_settings()
+    fold_deviances = {setting["config"]: [] for setting in candidates}
+    seconds, fits = 0.0, 0
+    for fold in range(CV_FOLDS):
+        validation = folds == fold
+        X_fit, y_fit = X_train[~validation], y_train[~validation]
+        X_validation, y_validation = X_train[validation], y_train[validation]
+        where = (year, split_id, n, draw, fold)
+        for setting in candidates:
+            if setting["model"] == "gbm":
+                continue
+            fitted = fit_setting(setting, X_fit, y_fit, X_validation, seed)
+            seconds += fitted["seconds"]
+            fits += 1
+            fold_deviances[setting["config"]].append(validation_deviance(y_validation, fitted["predicted"], where))
+        for depth in GBM_DEPTHS:
+            start = time.perf_counter()
+            boosted = make_gbm(depth, seed).fit(X_fit, y_fit)
+            seconds += time.perf_counter() - start
+            fits += 1
+            # One fit with GBM_MAX_TREES trees gives the predictions after every count in GBM_TREE_COUNTS.
+            for trees, predicted in enumerate(boosted.staged_predict(X_validation), start=1):
+                if trees in GBM_TREE_COUNTS:
+                    deviance = validation_deviance(y_validation, predicted, where)
+                    fold_deviances[f"gbm_depth{depth}_trees{trees}"].append(deviance)
+    # A configuration replaces the one chosen so far only if its mean is
+    # strictly lower, so a tie stays with the earlier one in the order of candidates.
+    chosen = candidates[0]
+    for setting in candidates[1:]:
+        if np.mean(fold_deviances[setting["config"]]) < np.mean(fold_deviances[chosen["config"]]):
+            chosen = setting
+    refit = fit_setting(chosen, X_train, y_train, X_test, seed)
+    fits += 1
+    assert fits == CV_SELECT_FITS, f"cv_select made {fits} fits, not CV_SELECT_FITS {CV_SELECT_FITS}."
+    return {"setting": chosen, "predicted": refit["predicted"], "seconds": seconds + refit["seconds"], "fits": fits}
+
+
+def run_analysis_draw(X_pool, y_pool, pair_pool, X_test, y_test, year, split_id, n, draw, settings, cv_draws):
+    """Fit the methods of stage 5 on one training sample of the analysis year and predict the test rows.
+
+    The sample is drawn with rng("draw", year, split_id, n, draw) and every
+    model gets seed_int("model", year, split_id, n, draw), as in run_draw.
+    ppml, rf and gbm are fitted once each at the settings frozen for this size
+    (settings, from frozen_settings), the ridge line with its own
+    cross-validation (fit_ridge), and, on the draws below cv_draws, cv_select.
+    The test rows play no part in any fit or choice.
+    """
+    positions = draw_sample(len(y_pool), year, split_id, n, draw)
+    X_train, y_train, pair_train = X_pool[positions], y_pool[positions], pair_pool[positions]
+    seed = seed_int("model", year, split_id, n, draw)
+    fitted = {model: fit_setting(settings[model], X_train, y_train, X_test, seed) for model in CANDIDATES}
+    ridge = fit_ridge(X_train, y_train, pair_train, X_test, year, split_id, n, draw)
+    selected = None
+    if draw < cv_draws:
+        selected = cv_select(X_train, y_train, pair_train, X_test, year, split_id, n, draw, seed)
+    return {"fitted": fitted, "ridge": ridge, "cv_select": selected, "largest_train_flow": y_train.max()}
+
+
+def run_analysis_draws(X_pool, y_pool, pair_pool, X_test, y_test, year, split_id, n, draws, settings, cv_draws):
+    """Run the draws 0 to draws - 1 of one size of stage 5 and yield their results in the order of the draws.
+
+    As run_draws: one after the other with N_JOBS = 1, otherwise spread over
+    N_JOBS worker processes started with "forkserver". Each draw is keyed by
+    its own numbers, so nothing depends on the number of workers.
+    """
+    if N_JOBS == 1:
+        for draw in range(draws):
+            yield run_analysis_draw(X_pool, y_pool, pair_pool, X_test, y_test, year, split_id, n, draw, settings,
+                                    cv_draws)
+        return
+    context = multiprocessing.get_context("forkserver")
+    with concurrent.futures.ProcessPoolExecutor(max_workers=N_JOBS, mp_context=context) as executor:
+        yield from executor.map(run_analysis_draw, repeat(X_pool), repeat(y_pool), repeat(pair_pool), repeat(X_test),
+                                repeat(y_test), repeat(year), repeat(split_id), repeat(n), range(draws),
+                                repeat(settings), repeat(cv_draws))
+
+
+def score_row(keys, method, setting, predicted, y_test, seconds, fits):
+    """One row of analysis_runs.csv: the method, the model and setting behind it, its scores, seconds and fits."""
+    assert np.isfinite(predicted).all() and (predicted > 0).all(), \
+        f"Predictions that are not positive and finite at {keys}, {method}. Stop and report."
+    row = dict(keys)
+    row["method"] = method
+    row.update(setting)
+    mean_test_flow = y_test.mean()
+    row["test_deviance"] = mean_poisson_deviance(y_test, predicted)
+    row["d2"] = d2_tweedie_score(y_test, predicted, power=1)
+    row["mae_rel"] = mean_absolute_error(y_test, predicted) / mean_test_flow
+    row["rmse_rel"] = root_mean_squared_error(y_test, predicted) / mean_test_flow
+    row["seconds"] = seconds
+    row["fits"] = fits
+    return row
+
+
+def analysis_rows(result, y_test, settings, keys):
+    """The rows of one draw for analysis_runs.csv, one per method (stage 5 steps 1 to 5).
+
+    keys holds the columns that name the draw: year, split, size and draw.
+    size_rule is a copy of the row of the model the size rule chooses at this
+    size, with its one fit. best_of_three is a copy of the row of whichever of
+    ppml, rf and gbm has the lowest test deviance on this draw (a tie goes to
+    the first of the three); it looks at the test set, so it is a reference,
+    and its cost is the three fits. cv_select is there only on the draws that
+    ran it.
+    """
+    rows = {}
+    for model in CANDIDATES:
+        fitted = result["fitted"][model]
+        rows[model] = score_row(keys, model, settings[model], fitted["predicted"], y_test, fitted["seconds"], 1)
+    # The copies are made before the ppml row gets its own columns below.
+    rows["size_rule"] = dict(rows[settings["chosen"]])
+    rows["size_rule"]["method"] = "size_rule"
+    lowest = CANDIDATES[0]
+    for model in CANDIDATES[1:]:
+        # Strictly lower only, so that a tie stays with the earlier model.
+        if rows[model]["test_deviance"] < rows[lowest]["test_deviance"]:
+            lowest = model
+    rows["best_of_three"] = dict(rows[lowest])
+    rows["best_of_three"]["method"] = "best_of_three"
+    rows["best_of_three"]["fits"] = len(CANDIDATES)
+    rows["best_of_three"]["seconds"] = sum(rows[model]["seconds"] for model in CANDIDATES)
+    selected = result["cv_select"]
+    if selected is not None:
+        rows["cv_select"] = score_row(keys, "cv_select", selected["setting"], selected["predicted"], y_test,
+                                      selected["seconds"], selected["fits"])
+    ridge = result["ridge"]
+    rows["ridge"] = score_row(keys, "ridge", {"model": "ridge", "config": "ridge"}, ridge["test_predicted"], y_test,
+                              ridge["seconds"], RIDGE_FITS)
+    rows["ridge"]["ridge_alpha"] = ridge["alpha"]
+    # What stage 3 records about the ppml fit (section 8), on the ppml row only.
+    ppml = result["fitted"]["ppml"]["ppml"]
+    rows["ppml"]["constant_columns"] = ppml["constant_columns"]
+    rows["ppml"]["lbfgs_fallback"] = int(ppml["fell_back"])
+    rows["ppml"]["train_total_ratio"] = ppml["total_ratio"]
+    return [rows[method] for method in METHODS if method in rows]
+
+
+def analysis_runs_table(rows):
+    """The rows of analysis_rows as a table, with the columns of analysis_runs.csv in order."""
+    table = pd.DataFrame(rows).reindex(columns=ANALYSIS_RUN_COLUMNS)
+    for column in ANALYSIS_WHOLE_NUMBER_COLUMNS:
+        table[column] = table[column].astype("Int64")
+    return table
+
+
+def method_draws(runs):
+    """One row per size and draw, one column per method, holding its test deviance on that draw (empty if not run)."""
+    wide = runs.pivot(index=["size", "draw"], columns="method", values="test_deviance").reset_index()
+    wide.columns.name = None
+    return wide
+
+
+def the_only(values):
+    """The value, if every entry of values is the same one; otherwise an empty text."""
+    distinct = values.unique()
+    return distinct[0] if len(distinct) == 1 else ""
+
+
+def analysis_summary(runs):
+    """analysis_summary.csv: one row per size and method (stage 5).
+
+    Every row has the method's mean, standard error and median test deviance
+    over its draws, se_unreliable (one draw holds more than half of the sum),
+    and its mean seconds and fits per draw; model and config where they are the
+    same on every draw. best is the better of rf and gbm at that size by mean
+    test deviance (a tie goes to rf). Then, each on one method's rows:
+    - ppml: the draws in which ppml has the lower test deviance than rf, gbm and
+      best on the same training sample (decision 12; a tie is not a win);
+    - size_rule: the mean paired difference size_rule minus cv_select over the
+      draws that have both, its standard error, and within_2se, whether the
+      difference is at most twice its standard error (the test of H2); and the
+      mean paired difference size_rule minus best_of_three with its standard error;
+    - ridge: the mean paired difference ridge minus ppml with its standard
+      error, and the draws in which ridge beats best (decisions 20 and 22).
+    """
+    deviance = method_draws(runs)
+    rows = []
+    for size, at_size in runs.groupby("size"):
+        wide = deviance[deviance["size"] == size]
+        best = "rf" if wide["rf"].mean() <= wide["gbm"].mean() else "gbm"
+        for method in METHODS:
+            of_method = at_size[at_size["method"] == method]
+            values = of_method["test_deviance"]
+            row = {"size": size, "method": method, "model": the_only(of_method["model"]),
+                   "config": the_only(of_method["config"]), "draws": len(values), "mean": values.mean(),
+                   "se": values.std() / np.sqrt(len(values)), "se_unreliable": values.max() / values.sum() > 0.5,
+                   "median": values.median(), "seconds": of_method["seconds"].mean(),
+                   "fits": of_method["fits"].mean()}
+            if method == "ppml":
+                row["best"] = best
+                row["ppml_beats_rf"] = int((wide["ppml"] < wide["rf"]).sum())
+                row["ppml_beats_gbm"] = int((wide["ppml"] < wide["gbm"]).sum())
+                row["ppml_beats_best"] = int((wide["ppml"] < wide[best]).sum())
+            if method == "size_rule":
+                both = wide[wide["cv_select"].notna()]
+                difference = both["size_rule"] - both["cv_select"]
+                row["minus_cv_select"] = difference.mean()
+                row["se_minus_cv_select"] = paired_se(difference)
+                row["draws_with_cv_select"] = len(difference)
+                row["within_2se"] = row["minus_cv_select"] <= 2 * row["se_minus_cv_select"]
+                difference = wide["size_rule"] - wide["best_of_three"]
+                row["minus_best_of_three"] = difference.mean()
+                row["se_minus_best_of_three"] = paired_se(difference)
+            if method == "ridge":
+                difference = wide["ridge"] - wide["ppml"]
+                row["minus_ppml"] = difference.mean()
+                row["se_minus_ppml"] = paired_se(difference)
+                row["ridge_beats_best"] = int((wide["ridge"] < wide[best]).sum())
+            rows.append(row)
+    table = pd.DataFrame(rows, columns=SUMMARY_COLUMNS)
+    # fits is the same on every draw of a method, so its mean is a whole number.
+    for column in ["fits", "ppml_beats_rf", "ppml_beats_gbm", "ppml_beats_best", "draws_with_cv_select",
+                   "ridge_beats_best"]:
+        table[column] = table[column].astype("Int64")
+    # True or False on the size_rule rows, empty on the others.
+    table["within_2se"] = table["within_2se"].astype("boolean")
+    return table
+
+
+def analysis_matrices(runs):
+    """At every size, the test deviance of ppml, rf, gbm and ridge on every draw: one row per draw, in order."""
+    matrices = {}
+    for n in sorted(int(size) for size in runs["size"].unique()):
+        at_size = runs[(runs["size"] == n) & runs["method"].isin(CUTOFF_MODELS)]
+        wide = at_size.pivot(index="draw", columns="method", values="test_deviance").sort_index()
+        matrix = wide[list(CUTOFF_MODELS)].to_numpy()
+        assert np.isfinite(matrix).all(), f"A model is missing a draw at size {n}."
+        matrices[n] = matrix
+    return matrices
+
+
+def analysis_gaps(matrices, positions):
+    """The gaps of analysis_cutoff.csv at every size, on one set of draws.
+
+    positions maps each size to the rows of its matrix to use: a resample of the
+    draws, or every draw once. At each size the mean test deviance of each
+    model is taken over those rows, best is the better of rf and gbm (a tie
+    goes to rf), and each comparison's gap is the mean of its model minus that
+    of best. Nothing is tuned: the settings are the frozen ones.
+    """
+    rows = []
+    for n, matrix in matrices.items():
+        means = dict(zip(CUTOFF_MODELS, matrix[positions[n]].mean(axis=0)))
+        best = "rf" if means["rf"] <= means["gbm"] else "gbm"
+        row = {"size": n, "best": best}
+        for comparison, model in CUTOFF_COMPARISONS.items():
+            row[f"gap_{comparison}"] = means[model] - means[best]
+        rows.append(row)
+    return pd.DataFrame(rows)
+
+
+def check_analysis_gaps(matrices, summary):
+    """Before the bootstrap: on every draw once, analysis_gaps must give best and the gaps of the means in summary.
+
+    The gaps are compared to a relative 1e-9 of the means: the two add up the
+    same draws in a different order, so they can differ in the last digits.
+    """
+    every_draw = {n: np.arange(len(matrix)) for n, matrix in matrices.items()}
+    again = analysis_gaps(matrices, every_draw)
+    for row in again.itertuples():
+        means = summary[summary["size"] == row.size].set_index("method")["mean"]
+        best = summary.loc[(summary["size"] == row.size) & (summary["method"] == "ppml"), "best"].item()
+        assert row.best == best, f"The bootstrap's better ensemble differs from the summary at size {row.size}."
+        for comparison, model in CUTOFF_COMPARISONS.items():
+            expected = means[model] - means[best]
+            scale = max(abs(means[model]), abs(means[best]))
+            assert abs(getattr(row, f"gap_{comparison}") - expected) <= 1e-9 * scale, \
+                f"The bootstrap's gap differs from the summary at size {row.size}, {comparison}."
+    return again
+
+
+def reversal_sizes(sizes, gap, pattern):
+    """The two sizes around the change from zero or positive to negative, on reversal and reversal_then_crossing.
+
+    find_crossing gives no n_star for these patterns; decision 12 reports the
+    reversal below last_crossing, so stage 5 says where it is. Empty on the
+    other patterns.
+    """
+    result = {"reversal_from": np.nan, "reversal_to": np.nan}
+    if pattern not in ("reversal", "reversal_then_crossing"):
+        return result
+    sizes = np.asarray(sizes)
+    negative = np.asarray(gap, dtype=float) < 0
+    for i in range(len(negative) - 1):
+        if not negative[i] and negative[i + 1]:
+            result["reversal_from"], result["reversal_to"] = int(sizes[i]), int(sizes[i + 1])
+            return result
+    return result
+
+
+def analysis_crossings(gap_table):
+    """find_crossing on the gap of each comparison of analysis_cutoff.csv, with the sizes around a reversal."""
+    rows = []
+    for comparison in CUTOFF_COMPARISONS:
+        gap = gap_table[f"gap_{comparison}"]
+        result = find_crossing(gap_table["size"], gap)
+        rows.append({"comparison": comparison, "sizes": len(gap_table), **result,
+                     **reversal_sizes(gap_table["size"], gap, result["pattern"])})
+    return pd.DataFrame(rows)
+
+
+def bootstrap_analysis(matrices, year, split_id, resamples):
+    """find_crossing on resampled draws, for each comparison of analysis_cutoff.csv.
+
+    As in stage 4 step 6: in resample b, at each size n separately, the draws
+    are drawn again with replacement, as many as there are, with
+    rng("bootstrap", year, split_id, n, b), the same drawn draws for every
+    model and for both comparisons. Nothing is tuned inside a resample.
+    Returns one row per resample and comparison.
+    """
+    rows = []
+    for resample in range(resamples):
+        positions = {}
+        for n, matrix in matrices.items():
+            draws = len(matrix)
+            positions[n] = rng("bootstrap", year, split_id, n, resample).integers(0, draws, size=draws)
+        resampled = analysis_gaps(matrices, positions)
+        for comparison in CUTOFF_COMPARISONS:
+            result = find_crossing(resampled["size"], resampled[f"gap_{comparison}"])
+            rows.append({"resample": resample, "comparison": comparison, "pattern": result["pattern"],
+                         "n_star": result["n_star"], "last_crossing": result["last_crossing"]})
+    return pd.DataFrame(rows)
+
+
+def analysis_cutoff_table(crossing_table, resampled):
+    """analysis_cutoff.csv: the columns of cutoff.csv (cutoff_table), and the sizes around a reversal."""
+    table = cutoff_table(crossing_table, resampled)
+    for column in ["reversal_from", "reversal_to"]:
+        table[column] = table[column].astype("Int64")
+    return table
+
+
+def selector_choices(runs, selector):
+    """On the draws that have both selectors: the model the selector picked, the winner, and the difference.
+
+    The winner is the model best_of_three found best on the draw (a tie goes to
+    the first of ppml, rf, gbm). For cv_select the model picked is the model of
+    its chosen configuration, whatever its setting. The difference is the
+    selector's test deviance minus that of best_of_three; for cv_select it can
+    be negative, since its configuration need not be one of the three frozen
+    settings. The result is what selection_confusion reads.
+    """
+    deviance = method_draws(runs)
+    picked = runs[runs["method"] == selector][["size", "draw", "model"]].rename(columns={"model": "picked"})
+    choices = deviance[deviance["cv_select"].notna()].merge(picked, on=["size", "draw"])
+    choices["winner"] = winners(choices)
+    choices["difference"] = choices[selector] - choices["best_of_three"]
+    return choices[["size", "draw", "picked", "winner", "difference"]]
+
+
+def selection_confusion_table(runs):
+    """selection_confusion.csv: for size_rule and cv_select, the model picked against the model that won.
+
+    For each selector and each size, and for all sizes together (sizes =
+    all): one row per model the selector picked, with the draws in which each
+    of ppml, rf and gbm won (selection_confusion; at one size the size rule
+    picks one model, so it has one such row there). Then a row picked = total
+    with every draw of that scope, the share picked right, the share that
+    always picking the most frequent winner of each size would get, and the
+    mean difference to best_of_three with its paired standard error.
+    """
+    tables = []
+    for selector in ("size_rule", "cv_select"):
+        counts, scores = selection_confusion(selector_choices(runs, selector))
+        rows = []
+        for score in scores.to_dict("records"):
+            in_scope = counts[counts["sizes"] == score["sizes"]]
+            rows.extend(in_scope.to_dict("records"))
+            total = {"sizes": score["sizes"], "picked": "total", "draws": score["draws"]}
+            for winner in CANDIDATES:
+                total[f"won_{winner}"] = int(in_scope[f"won_{winner}"].sum())
+            total.update({key: score[key] for key in ["share_picked_right", "share_most_frequent_winner",
+                                                       "mean_difference", "se_difference"]})
+            rows.append(total)
+        table = pd.DataFrame(rows)
+        table.insert(0, "selector", selector)
+        tables.append(table)
+    return pd.concat(tables, ignore_index=True)

@@ -1,6 +1,6 @@
 # Results
 
-<!-- Drafted with Claude (Anthropic). Asked for (18 October 2026, section 5 of docs/build_plan.md): one line per file of this folder. Later asked for (20 October 2026, step 2 of section 10 of the build plan): the files of the checkpoint report. Later asked for (22 October 2026, step 6 of section 10 of the build plan): the files of stage 4. -->
+<!-- Drafted with Claude (Anthropic). Asked for (18 October 2026, section 5 of docs/build_plan.md): one line per file of this folder. Later asked for (20 October 2026, step 2 of section 10 of the build plan): the files of the checkpoint report. Later asked for (22 October 2026, step 6 of section 10 of the build plan): the files of stage 4. Later asked for (22 October 2026, step 7 of section 10 of the build plan): the files of stage 5. -->
 
 Every file in this folder is written by a stage notebook in `code/` run in the Nuvolos workspace and committed from that run, except in `checkpoint/` (section 6 of the build plan): `checkpoint/inputs/` (and `checkpoint/rerun/inputs/`, if the checkpoint calls for a rerun) hold unchanged copies of the two files of part 1 of stage 3 committed from Nuvolos, and the report beside them is written by `03b_checkpoint.ipynb`, which fits nothing, run by Claude Code on those copies. Quick mode (`ADA_QUICK=1`) writes into `results_quick/` instead, which git ignores. Section 6 of [`docs/build_plan.md`](../docs/build_plan.md) describes each file in detail.
 
@@ -13,10 +13,10 @@ Every file in this folder is written by a stage notebook in `code/` run in the N
 | `size_rule.csv` | `04_size_rule.ipynb` | Per training size, one row for each of `ppml`, tuned `rf` and tuned `gbm`: the tuned settings, the mean, standard error and median of the test deviance, whether one draw holds more than half of the sum over draws (`se_unreliable`), whether the size rule chooses it, and the tuned settings at an edge of their grid |
 | `gaps.csv` | `04_size_rule.ipynb` | Per training size and comparison (`ppml` against tuned `rf`, tuned `gbm` and the better of the two): the error gap with its paired standard error and whether `ppml` is within two standard errors, the bias and variance gaps in their three versions, and the draws in which `ppml` wins |
 | `cutoff.csv` | `04_size_rule.ipynb` | Per comparison: the pattern of the error gap over the sizes, the development-year cutoff n* (or the last crossing), and the bootstrap shares of each pattern with the intervals |
-| `analysis_runs.csv` | `05_analysis.ipynb` | One row per method and draw in the analysis year |
-| `analysis_summary.csv` | `05_analysis.ipynb` | Per training size: the scores of each method, and the test of the size rule against cross-validation |
-| `analysis_cutoff.csv` | `05_analysis.ipynb` | The analysis-year cutoff at the fixed settings: the test of H1 |
-| `selection_confusion.csv` | `05_analysis.ipynb` | The model each selector picked against the model that won |
+| `analysis_runs.csv` | `05_analysis.ipynb` | One row per method and training draw in the analysis year (`ppml`, `rf` and `gbm` at the frozen settings, `size_rule`, `best_of_three`, `cv_select`, `ridge`): the model and setting behind it, test deviance and the other scores, seconds and fits |
+| `analysis_summary.csv` | `05_analysis.ipynb` | Per training size and method: the mean, standard error and median of the test deviance, seconds and fits; the draws in which `ppml` wins, on the `ppml` rows; `size_rule` minus `cv_select` with its standard error and `within_2se` (the test of H2) and `size_rule` minus `best_of_three`, on the `size_rule` rows; `ridge` minus `ppml` and the draws in which `ridge` beats the better ensemble, on the `ridge` rows |
+| `analysis_cutoff.csv` | `05_analysis.ipynb` | The analysis-year cutoff at the frozen settings, with the columns of `cutoff.csv` and the sizes around a reversal: the row `best` is the test of H1, the row `ridge_best` the cutoff test of `ridge` beside it (decision 22) |
+| `selection_confusion.csv` | `05_analysis.ipynb` | For `size_rule` and `cv_select`, per size and over all sizes: the model picked against the model that won each draw, and a row `total` with the share picked right and the difference to `best_of_three` |
 | `check_runs.csv`, `check_components.csv`, `check_cutoff.csv` | `06_checks.ipynb` | The same as stages 3 and 4 for the three checks: added noise, another test split, twice the trees |
 
 TODO: the files appear here as their stages are run in Nuvolos.
