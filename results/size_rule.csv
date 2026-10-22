@@ -1,0 +1,22 @@
+size,model,config,rf_features,rf_min_leaf,gbm_depth,gbm_trees,draws,mean,se,se_unreliable,median,chosen,edges
+50,ppml,ppml,,,,,50,27514282425.00825,27507471086.68198,True,1426943.5313607561,False,
+50,rf,rf_features3_leaf1,3,1,,,50,1906762.6366444547,74978.8680294948,False,1777024.0628562777,True,rf_min_leaf below: cannot be extended
+50,gbm,gbm_depth1_trees50,,,1,50,50,2195727.421130277,158862.0342164172,False,1925539.164317937,False,
+100,ppml,ppml,,,,,50,2059339.2472451322,718514.2684597938,False,989306.2655891243,False,
+100,rf,rf_features3_leaf1,3,1,,,50,1507756.4254101207,43992.31398458109,False,1471727.9174119844,False,rf_min_leaf below: cannot be extended
+100,gbm,gbm_depth2_trees50,,,2,50,50,1405070.4743444175,39033.49646436377,False,1355990.8780852698,True,
+200,ppml,ppml,,,,,50,1128446.3670426488,207320.849695831,False,765056.9392655784,False,
+200,rf,rf_features8_leaf1,8,1,,,50,1176149.1626707355,75975.51692225234,False,1011287.4183514847,False,rf_min_leaf below: cannot be extended
+200,gbm,gbm_depth3_trees50,,,3,50,50,1033489.5588011108,19778.70723790139,False,1021299.9022811174,True,
+500,ppml,ppml,,,,,50,666158.7384533002,31934.118674919737,False,588844.2080981781,True,
+500,rf,rf_features8_leaf1,8,1,,,50,804881.9934981499,28562.614402460677,False,753092.3935627791,False,rf_features above: cannot be extended; rf_min_leaf below: cannot be extended
+500,gbm,gbm_depth5_trees50,,,5,50,50,776246.7100823951,15212.059534513613,False,759913.6004237575,False,
+1000,ppml,ppml,,,,,50,561775.5463144687,14674.106989832608,False,531744.092216541,True,
+1000,rf,rf_features8_leaf1,8,1,,,50,762877.7926934944,70460.32987501279,False,622641.8823038118,False,
+1000,gbm,gbm_depth1_trees1000,,,1,1000,50,616896.3403452436,9050.489990767932,False,624979.7243429311,False,gbm_depth below: cannot be extended
+2000,ppml,ppml,,,,,50,510568.7518964051,7347.51051720391,False,495545.08404870157,False,
+2000,rf,rf_features8_leaf1,8,1,,,50,521055.15922458423,5896.425160693008,False,516416.31616266456,False,rf_features above: cannot be extended; rf_min_leaf below: cannot be extended
+2000,gbm,gbm_depth1_trees1000,,,1,1000,50,493332.21252728277,6849.224366476743,False,487822.6653301857,True,"gbm_depth below: cannot be extended; gbm_trees above: limit of the grid (the one round of Grid edges is done, decision 19)"
+5000,ppml,ppml,,,,,50,482634.4773282462,4470.869770162045,False,473200.6848320636,False,
+5000,rf,rf_features8_leaf1,8,1,,,50,463909.4822520084,7090.060360577383,False,451507.2292493035,False,rf_min_leaf below: cannot be extended
+5000,gbm,gbm_depth1_trees1000,,,1,1000,50,429893.60538438096,3575.3888536241916,False,431371.78292838845,True,"gbm_trees above: limit of the grid (the one round of Grid edges is done, decision 19)"

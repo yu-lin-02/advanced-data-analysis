@@ -1,0 +1,4 @@
+comparison,sizes,pattern,n_star,last_crossing,crossing_from,crossing_to,resamples,share_one_crossing,share_reversal,share_reversal_then_crossing,share_never_overtaken,share_never_ahead,share_several,resamples_one_crossing,n_star_low,n_star_high,resamples_reversal_then_crossing,last_crossing_low,last_crossing_high
+rf,7,reversal_then_crossing,,2778.969858207342,2000,5000,1000,0.0,0.001,0.889,0.0,0.0,0.11,0,,,889,1960.5326783080354,3781.2233723213176
+gbm,7,reversal_then_crossing,,1695.5882429262172,1000,2000,1000,0.0,0.0,0.871,0.0,0.0,0.129,0,,,871,1432.0442621565135,1960.7405352974563
+best,7,reversal_then_crossing,,1695.5882429262172,1000,2000,1000,0.0,0.0,0.872,0.0,0.0,0.128,0,,,872,1432.0812096645873,1960.682978174568
