@@ -27,7 +27,13 @@
 # selection on the folds of the ridge line, the summary with the test of H2,
 # the cutoff of H1 and of decision 22 with its bootstrap, and the selection
 # table), with the folds of the ridge line moved into their own function and
-# forests that can be fitted without out-of-bag predictions.
+# forests that can be fitted without out-of-bag predictions. Later asked for (23
+# October 2026, step 7 of section 10 of docs/build_plan.md, after Yu's run of
+# stage 5): the functions of stage 6 (noise added to the training flows of a
+# draw, one whole experiment of stage 3 as a function that stage 3 and stage 6
+# share, the steps of stage 4 on the files of one experiment, and the check
+# with twice the trees), with the scores of one configuration on the test rows
+# in their own function, which that check reuses.
 """Code used by more than one notebook (Requirement 4.9).
 
 Every notebook imports this module in its first code cell, before pandas,
@@ -316,6 +322,20 @@ def draw_sample(pool_rows, year, split_id, n, draw):
     return positions
 
 
+def noise_factor(rows, year, split_id, n, draw):
+    """The factors that multiply the training flows of one draw in the check noise of stage 6 (decision 5).
+
+    Each factor is exp(s * z - s**2 / 2), with z standard normal from
+    rng("noise", year, split_id, n, draw) and s**2 = ln(1 + NOISE_VAR), so it
+    has mean 1 and variance NOISE_VAR: the expected flow stays the same and
+    its variance grows, as in case 3 of Santos Silva and Tenreyro (2006, p. 647).
+    One independent factor per training row, drawn fresh for every draw.
+    """
+    s = np.sqrt(np.log(1 + NOISE_VAR))
+    z = rng("noise", year, split_id, n, draw).standard_normal(rows)
+    return np.exp(s * z - s**2 / 2)
+
+
 def make_ppml():
     """The gravity equation estimated by PPML. alpha=0: the default alpha=1 would add a ridge penalty."""
     return PoissonRegressor(alpha=0, solver="newton-cholesky")
@@ -326,14 +346,15 @@ def make_ridge(alpha):
     return PoissonRegressor(alpha=alpha, solver="newton-cholesky")
 
 
-def make_rf(max_features, min_leaf, seed, oob=True):
+def make_rf(max_features, min_leaf, seed, oob=True, trees=RF_TREES):
     """A random forest with the Poisson loss, fitted on one thread.
 
     oob_score=True keeps the out-of-bag predictions for the training deviance
     of stage 3. It leaves the predictions unchanged, so stage 5, which records
     no training deviance, fits its forests with oob=False and times the fit alone.
+    trees is RF_TREES except in the check trees2x of stage 6, which doubles it.
     """
-    return RandomForestRegressor(n_estimators=RF_TREES, criterion="poisson", max_features=max_features,
+    return RandomForestRegressor(n_estimators=trees, criterion="poisson", max_features=max_features,
                                  min_samples_leaf=min_leaf, oob_score=oob, n_jobs=1, random_state=seed)
 
 
@@ -475,7 +496,7 @@ def fit_ridge(X_train, y_train, pair_train, X_test, year, split_id, n, draw):
             "alpha": chosen, "seconds": seconds}
 
 
-def run_draw(X_pool, y_pool, pair_pool, X_test, y_test, year, split_id, n, draw):
+def run_draw(X_pool, y_pool, pair_pool, X_test, y_test, year, split_id, n, draw, noise=False):
     """Fit every model on one training sample and predict the test rows for every configuration (section 7).
 
     The sample is drawn with rng("draw", year, split_id, n, draw) and every
@@ -491,10 +512,19 @@ def run_draw(X_pool, y_pool, pair_pool, X_test, y_test, year, split_id, n, draw)
     fit of a forest includes the out-of-bag predictions that oob_score=True
     makes scikit-learn compute, and the ridge line sums its 31 fits); and what
     stage 3 records about the sample, the ppml fit and the ridge line.
+
+    With noise=True (the check noise of stage 6), the training flows of the
+    sample are multiplied by noise_factor before any model sees them: the same
+    sample and the same seeds as without noise, and the test flows untouched.
+    Everything computed on the training sample (the training deviance, the
+    largest training flow, the training total of ppml, the folds of the ridge
+    line) then uses the noisy flows.
     """
     assert max(GBM_TREE_COUNTS) <= GBM_MAX_TREES, "A tree count of GBM_TREE_COUNTS is above GBM_MAX_TREES."
     positions = draw_sample(len(y_pool), year, split_id, n, draw)
     X_train, y_train = X_pool[positions], y_pool[positions]
+    if noise:
+        y_train = y_train * noise_factor(n, year, split_id, n, draw)
     seed = seed_int("model", year, split_id, n, draw)
     test_predicted, train_deviance, seconds = {}, {}, {}
 
@@ -566,7 +596,7 @@ def run_draw(X_pool, y_pool, pair_pool, X_test, y_test, year, split_id, n, draw)
     }
 
 
-def run_draws(X_pool, y_pool, pair_pool, X_test, y_test, year, split_id, n, draws):
+def run_draws(X_pool, y_pool, pair_pool, X_test, y_test, year, split_id, n, draws, noise=False):
     """Run the draws 0 to draws - 1 of one size and yield their results in the order of the draws.
 
     With N_JOBS = 1 the draws run one after the other in this process. With
@@ -574,16 +604,17 @@ def run_draws(X_pool, y_pool, pair_pool, X_test, y_test, year, split_id, n, draw
     "forkserver" (section 7): a worker forked from a process that has already
     fitted a boosted model can hang. Each draw is keyed by its own numbers, and
     the results come back in the order of the draws, so nothing depends on the
-    number of workers.
+    number of workers. noise is passed on to run_draw.
     """
     if N_JOBS == 1:
         for draw in range(draws):
-            yield run_draw(X_pool, y_pool, pair_pool, X_test, y_test, year, split_id, n, draw)
+            yield run_draw(X_pool, y_pool, pair_pool, X_test, y_test, year, split_id, n, draw, noise)
         return
     context = multiprocessing.get_context("forkserver")
     with concurrent.futures.ProcessPoolExecutor(max_workers=N_JOBS, mp_context=context) as executor:
         yield from executor.map(run_draw, repeat(X_pool), repeat(y_pool), repeat(pair_pool), repeat(X_test),
-                                repeat(y_test), repeat(year), repeat(split_id), repeat(n), range(draws))
+                                repeat(y_test), repeat(year), repeat(split_id), repeat(n), range(draws),
+                                repeat(noise))
 
 
 def check_predictions(predicted, keys):
@@ -593,30 +624,43 @@ def check_predictions(predicted, keys):
     assert not bad, f"Predictions that are not positive and finite at {keys}: {bad}. Stop and report."
 
 
+def test_scores(y_test, predicted, groups, where):
+    """The scores of one configuration on the test rows (stage 3 step 5).
+
+    The mean Poisson deviance, D squared, MAE and RMSE divided by the mean test
+    flow, and the deviance of each group of test rows (test_groups), summed
+    over its rows and divided by all the test rows, so that the three add up to
+    the test deviance. where names the draw and configuration in the message
+    if they do not.
+    """
+    mean_test_flow = y_test.mean()
+    scores = {
+        "test_deviance": mean_poisson_deviance(y_test, predicted),
+        "d2": d2_tweedie_score(y_test, predicted, power=1),
+        "mae_rel": mean_absolute_error(y_test, predicted) / mean_test_flow,
+        "rmse_rel": root_mean_squared_error(y_test, predicted) / mean_test_flow,
+    }
+    unit = unit_deviance(y_test, predicted)
+    for group, name in enumerate(GROUP_NAMES):
+        scores[f"deviance_{name}"] = unit[groups == group].sum() / len(y_test)
+    groups_total = sum(scores[f"deviance_{name}"] for name in GROUP_NAMES)
+    assert np.isclose(groups_total, scores["test_deviance"], rtol=1e-8, atol=0), \
+        f"The three groups do not add up to the test deviance at {where}."
+    return scores
+
+
 def draw_rows(result, y_test, groups, keys):
     """The rows of one draw for dev_runs.csv, one per configuration (stage 3 step 5).
 
     keys holds the columns that name the draw: variant, year, split, size and draw.
     """
     rows = []
-    mean_test_flow = y_test.mean()
     for i, configuration in enumerate(CONFIGURATIONS):
         predicted = result["test_predicted"][i]
         row = dict(keys)
         row.update(configuration)
-        row["test_deviance"] = mean_poisson_deviance(y_test, predicted)
-        row["d2"] = d2_tweedie_score(y_test, predicted, power=1)
-        row["mae_rel"] = mean_absolute_error(y_test, predicted) / mean_test_flow
-        row["rmse_rel"] = root_mean_squared_error(y_test, predicted) / mean_test_flow
+        row.update(test_scores(y_test, predicted, groups, f"{keys}, {configuration['config']}"))
         row["train_deviance"] = result["train_deviance"][i]
-        # Each group's deviance is summed over its rows and divided by all the
-        # test rows, so the three add up to the test deviance.
-        unit = unit_deviance(y_test, predicted)
-        for group, name in enumerate(GROUP_NAMES):
-            row[f"deviance_{name}"] = unit[groups == group].sum() / len(y_test)
-        groups_total = sum(row[f"deviance_{name}"] for name in GROUP_NAMES)
-        assert np.isclose(groups_total, row["test_deviance"], rtol=1e-8, atol=0), \
-            f"The three groups do not add up to the test deviance at {keys}, {configuration['config']}."
         row["max_pred_ratio"] = predicted.max() / result["largest_train_flow"]
         row["seconds"] = result["seconds"][i]
         row["constant_columns"] = result["constant_columns"]
@@ -702,6 +746,59 @@ def component_rows(sum_predicted, sum_log_predicted, y_test, size_runs, n, pool_
         row.update(split_error(sum_predicted[i], sum_log_predicted[i], y_test, deviance_per_draw, n, pool_rows))
         rows.append(row)
     return rows
+
+
+def run_experiment(X_pool, y_pool, pair_pool, X_test, y_test, variant, year, split_id, sizes, draws, noise=False,
+                   report_ridge=True):
+    """Every size and draw of one experiment, as stage 3 steps 4 to 7 describe them (section 6).
+
+    Stage 3 runs the base experiment with it, and stage 6 the checks noise and
+    split2. For each size, every draw is run (run_draws), its predictions are
+    checked to be positive and finite, its rows kept for dev_runs.csv
+    (draw_rows), and the running sums of the predictions and of their logs
+    kept over the draws. The predictions themselves are not saved. After the
+    last draw of a size, the sums give the split of the error into variance
+    and remainder, one row per configuration (component_rows).
+
+    After each size it prints the checks of section 8 on ppml: the fits that
+    fell back to L-BFGS, the draws with a constant indicator, and the largest
+    relative difference between the predicted and the observed training total.
+    With report_ridge, it also prints, for each penalty of the grid, in how
+    many draws the ridge line chose it (stage 3; stage 6 reports nothing on
+    the ridge line, decision 18). Returns the two tables, with the columns of
+    dev_runs.csv and dev_components.csv.
+    """
+    groups = test_groups(y_test)
+    runs, components = [], []
+    for n in sizes:
+        start = time.perf_counter()
+        sum_predicted = np.zeros((len(CONFIGURATIONS), len(y_test)))
+        sum_log_predicted = np.zeros((len(CONFIGURATIONS), len(y_test)))
+        size_rows = []
+        for draw, result in enumerate(run_draws(X_pool, y_pool, pair_pool, X_test, y_test, year, split_id, n, draws,
+                                                noise)):
+            keys = {"variant": variant, "year": year, "split": split_id, "size": n, "draw": draw}
+            check_predictions(result["test_predicted"], keys)
+            sum_predicted += result["test_predicted"]
+            sum_log_predicted += np.log(result["test_predicted"])
+            size_rows.extend(draw_rows(result, y_test, groups, keys))
+        size_runs = runs_table(size_rows)
+        size_keys = {"variant": variant, "year": year, "split": split_id, "size": n}
+        components.extend(component_rows(sum_predicted, sum_log_predicted, y_test, size_runs, n, len(y_pool),
+                                         size_keys))
+        runs.append(size_runs)
+
+        ppml = size_runs[size_runs["config"] == "ppml"]
+        print(f"n = {n:>5,}: {draws} draws in {(time.perf_counter() - start) / 60:.1f} minutes. "
+              f"ppml: {int(ppml['lbfgs_fallback'].sum())} fit(s) fell back to L-BFGS, "
+              f"{int((ppml['constant_columns'] > 0).sum())} draw(s) with a constant indicator, "
+              f"largest relative difference of the training total {(ppml['train_total_ratio'] - 1).abs().max():.1e}")
+        if FIT_RIDGE and report_ridge:
+            chosen = size_runs.loc[size_runs["config"] == "ridge", "ridge_alpha"]
+            print("           ridge: draws in which cross-validation chose each penalty:")
+            for alpha in RIDGE_ALPHAS:
+                print(f"             {alpha:>7}: {int((chosen == alpha).sum())}")
+    return pd.concat(runs, ignore_index=True), components_table(components)
 
 
 def largest_relative_difference(new, old, keys, skip=("seconds",)):
@@ -2006,3 +2103,159 @@ def selection_confusion_table(runs):
         table.insert(0, "selector", selector)
         tables.append(table)
     return pd.concat(tables, ignore_index=True)
+
+
+# ---------------------------------------------------------------------------
+# Stage 6: the three checks on the development year (section 6)
+# ---------------------------------------------------------------------------
+
+# The three checks, in the order stage 6 runs them, as they appear in the
+# column variant of its files. The base experiment of stages 3 and 4 is "base".
+CHECKS = ("noise", "split2", "trees2x")
+
+
+def experiment_cutoff(runs, components, year, split_id, resamples):
+    """Steps 1, 2 and 4 to 6 of stage 4 on the files of one experiment.
+
+    The same functions as stage 4, in the same order: the summary by size and
+    configuration, rf and gbm tuned on this experiment's own test set, the
+    gaps of ppml with its win counts, the pattern of each comparison, the
+    check that the resampling code gives back the tuned settings and the
+    gaps, and the bootstrap with rng("bootstrap", year, split_id, n, b).
+    Returns the tuned settings, the table of gaps (the columns of gaps.csv)
+    and the cutoff (the columns of cutoff.csv).
+    """
+    summary = summarise(runs)
+    tuned = tune(summary)
+    wins = ppml_wins(per_draw(runs, line_configs(tuned)), better_ensemble(tuned))
+    gap_table = gaps_with_wins(gaps(components, runs, tuned), wins)
+    crossing_table = crossings(gap_table)
+    matrices = candidate_matrices(runs)
+    check_resampling(matrices, tuned, gap_table)
+    resampled = bootstrap_crossings(matrices, year, split_id, resamples)
+    return {"tuned": tuned, "gaps": gap_table, "cutoff": cutoff_table(crossing_table, resampled)}
+
+
+def trees2x_counts(tuned_trees):
+    """The tree counts at which the check trees2x scores gbm: the tuned count, twice it, and the new maximum."""
+    return sorted({tuned_trees, 2 * tuned_trees, 2 * GBM_MAX_TREES})
+
+
+def run_trees2x_draw(X_pool, y_pool, X_test, year, split_id, n, draw, rf_setting, gbm_setting):
+    """The check trees2x on one training sample: rf with twice the trees, gbm with twice the largest number of trees.
+
+    The sample and the seed are those of the base experiment,
+    rng("draw", year, split_id, n, draw) and seed_int("model", year, split_id,
+    n, draw). rf is fitted at its tuned setting (rf_setting) with 2 * RF_TREES
+    trees, without out-of-bag predictions, and scored with all its trees and
+    with its first RF_TREES trees alone. scikit-learn draws the seed of each
+    tree in turn from the one seed, so these first trees are the trees of the
+    base forest, and with them alone the forest of the base run comes back.
+    gbm is fitted once at its tuned depth (gbm_setting) with 2 * GBM_MAX_TREES
+    trees and scored, through staged prediction, at the counts of
+    trees2x_counts, the first of which is its tuned count: again the model of
+    the base run. Returns, for each configuration, its setting, its test
+    predictions and the seconds of the fit it came from, with the largest
+    training flow.
+    """
+    positions = draw_sample(len(y_pool), year, split_id, n, draw)
+    X_train, y_train = X_pool[positions], y_pool[positions]
+    seed = seed_int("model", year, split_id, n, draw)
+    entries = []
+
+    forest = make_rf(rf_max_features(rf_setting["rf_features"]), rf_setting["rf_min_leaf"], seed, oob=False,
+                     trees=2 * RF_TREES)
+    start = time.perf_counter()
+    forest.fit(X_train, y_train)
+    seconds = time.perf_counter() - start
+    # The forest of the base run: the mean of the first RF_TREES trees, added up
+    # in the order scikit-learn's predict adds them.
+    first_trees = np.zeros(len(X_test))
+    for tree in forest.estimators_[:RF_TREES]:
+        first_trees += tree.predict(X_test)
+    first_trees /= RF_TREES
+    rf_settings = {"model": "rf", "rf_features": rf_setting["rf_features"], "rf_min_leaf": rf_setting["rf_min_leaf"]}
+    entries.append({"setting": {**rf_settings, "config": rf_setting["config"]}, "predicted": first_trees,
+                    "seconds": seconds})
+    entries.append({"setting": {**rf_settings, "config": f"{rf_setting['config']}_trees{2 * RF_TREES}"},
+                    "predicted": forest.predict(X_test), "seconds": seconds})
+
+    depth = gbm_setting["gbm_depth"]
+    counts = trees2x_counts(gbm_setting["gbm_trees"])
+    boosted = make_gbm(depth, seed, trees=2 * GBM_MAX_TREES)
+    start = time.perf_counter()
+    boosted.fit(X_train, y_train)
+    seconds = time.perf_counter() - start
+    for trees, predicted in enumerate(boosted.staged_predict(X_test), start=1):
+        if trees in counts:
+            setting = {"model": "gbm", "config": f"gbm_depth{depth}_trees{trees}", "gbm_depth": depth,
+                       "gbm_trees": trees}
+            entries.append({"setting": setting, "predicted": predicted, "seconds": seconds})
+    return {"entries": entries, "largest_train_flow": y_train.max()}
+
+
+def run_trees2x_draws(X_pool, y_pool, X_test, year, split_id, n, draws, rf_setting, gbm_setting):
+    """Run the draws 0 to draws - 1 of the check trees2x and yield their results in the order of the draws.
+
+    As run_draws: one after the other with N_JOBS = 1, otherwise spread over
+    N_JOBS worker processes started with "forkserver".
+    """
+    if N_JOBS == 1:
+        for draw in range(draws):
+            yield run_trees2x_draw(X_pool, y_pool, X_test, year, split_id, n, draw, rf_setting, gbm_setting)
+        return
+    context = multiprocessing.get_context("forkserver")
+    with concurrent.futures.ProcessPoolExecutor(max_workers=N_JOBS, mp_context=context) as executor:
+        yield from executor.map(run_trees2x_draw, repeat(X_pool), repeat(y_pool), repeat(X_test), repeat(year),
+                                repeat(split_id), repeat(n), range(draws), repeat(rf_setting), repeat(gbm_setting))
+
+
+def trees2x_rows(result, y_test, groups, keys):
+    """The rows of one draw of the check trees2x, with the columns of dev_runs.csv.
+
+    The scores are those of stage 3 (test_scores) with the largest prediction
+    divided by the largest training flow and the seconds of the fit. There is
+    no training deviance: the forest is fitted without out-of-bag predictions.
+    """
+    rows = []
+    for entry in result["entries"]:
+        predicted = entry["predicted"]
+        where = f"{keys}, {entry['setting']['config']}"
+        assert np.isfinite(predicted).all() and (predicted > 0).all(), \
+            f"Predictions that are not positive and finite at {where}. Stop and report."
+        row = dict(keys)
+        row.update(entry["setting"])
+        row.update(test_scores(y_test, predicted, groups, where))
+        row["max_pred_ratio"] = predicted.max() / result["largest_train_flow"]
+        row["seconds"] = entry["seconds"]
+        rows.append(row)
+    return rows
+
+
+def trees2x_differences(check_runs, base_runs, tuned):
+    """For each configuration of the check trees2x: its test deviance against the tuned one of the base run.
+
+    tuned holds the tuned rf and gbm of the base experiment at the size of the
+    check (rows of size_rule.csv). On every draw, the difference is the
+    check's test deviance minus that of the tuned configuration of the same
+    model on the same training sample in base_runs (dev_runs.csv). Returns, per
+    configuration, the mean of both, the mean difference, its paired standard
+    error, and the largest difference on one draw relative to the base value:
+    for the configurations that are the tuned ones themselves, this checks
+    that the check redid the base run.
+    """
+    rows = []
+    for config, of_config in check_runs.groupby("config", sort=False):
+        model = of_config["model"].iloc[0]
+        size = of_config["size"].iloc[0]
+        base_config = tuned.loc[(tuned["size"] == size) & (tuned["model"] == model), "config"].item()
+        base = base_runs[(base_runs["size"] == size) & (base_runs["config"] == base_config)]
+        merged = of_config.merge(base[["draw", "test_deviance"]], on="draw", suffixes=("", "_base"))
+        assert len(merged) == len(of_config), f"Some draw of {config} has no base row of {base_config}."
+        difference = merged["test_deviance"] - merged["test_deviance_base"]
+        rows.append({"size": size, "model": model, "config": config, "base_config": base_config,
+                     "draws": len(merged), "mean": merged["test_deviance"].mean(),
+                     "base_mean": merged["test_deviance_base"].mean(), "difference": difference.mean(),
+                     "se_difference": paired_se(difference),
+                     "largest_relative_difference": float((difference.abs() / merged["test_deviance_base"]).max())})
+    return pd.DataFrame(rows)
