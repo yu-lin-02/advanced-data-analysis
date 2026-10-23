@@ -1,0 +1,9 @@
+selector,picked,draws,won_ppml,won_rf,won_gbm,share_picked_right,share_most_frequent_winner,mean_difference,se_difference
+size_rule,ppml,100,95,1,4,,,,
+size_rule,rf,50,27,19,4,,,,
+size_rule,gbm,200,147,6,47,,,,
+size_rule,total,350,269,26,55,0.46,0.7685714285714286,322629.1163912157,28177.495553263714
+cv_select,ppml,202,169,11,22,,,,
+cv_select,rf,46,29,12,5,,,,
+cv_select,gbm,102,71,3,28,,,,
+cv_select,total,350,269,26,55,0.5971428571428572,0.7685714285714286,1189712.0397711,501934.62026244245

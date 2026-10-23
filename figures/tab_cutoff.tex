@@ -1,0 +1,17 @@
+\begin{tabular}{lllllrrrrrrrr}
+\toprule
+Year & Run & Comparison & Pattern & Reversal & Crossing & 95\% interval (resamples) & one crossing & reversal & reversal then crossing & never overtaken & never ahead & several \\
+\midrule
+2017 & base & ppml vs tuned rf & reversal then crossing & 100 to 200 & last 2,779 & 1,961 to 3,781 (889) & 0.000 & 0.001 & 0.889 & 0.000 & 0.000 & 0.110 \\
+2017 & base & ppml vs tuned gbm & reversal then crossing & 200 to 500 & last 1,696 & 1,432 to 1,961 (871) & 0.000 & 0.000 & 0.871 & 0.000 & 0.000 & 0.129 \\
+2017 & base & ppml vs better ensemble & reversal then crossing & 200 to 500 & last 1,696 & 1,432 to 1,961 (872) & 0.000 & 0.000 & 0.872 & 0.000 & 0.000 & 0.128 \\
+2017 & noise & ppml vs tuned rf & reversal & 200 to 500 &  &  & 0.000 & 0.859 & 0.021 & 0.000 & 0.000 & 0.120 \\
+2017 & noise & ppml vs tuned gbm & reversal then crossing & 200 to 500 & last 1,944 & 1,525 to 4,215 (943) & 0.000 & 0.013 & 0.943 & 0.000 & 0.000 & 0.044 \\
+2017 & noise & ppml vs better ensemble & reversal then crossing & 200 to 500 & last 1,944 & 1,525 to 4,215 (943) & 0.000 & 0.013 & 0.943 & 0.000 & 0.000 & 0.044 \\
+2017 & split2 & ppml vs tuned rf & reversal & 50 to 100 &  &  & 0.000 & 0.777 & 0.000 & 0.092 & 0.000 & 0.131 \\
+2017 & split2 & ppml vs tuned gbm & several &  &  &  & 0.000 & 0.559 & 0.002 & 0.046 & 0.000 & 0.393 \\
+2017 & split2 & ppml vs better ensemble & several &  &  &  & 0.000 & 0.568 & 0.002 & 0.043 & 0.000 & 0.387 \\
+2019 & analysis & ppml vs better ensemble & reversal & 100 to 200 &  &  & 0.000 & 0.956 & 0.044 & 0.000 & 0.000 & 0.000 \\
+2019 & analysis & ridge vs better ensemble & reversal & 50 to 100 &  &  & 0.023 & 0.685 & 0.099 & 0.122 & 0.000 & 0.071 \\
+\bottomrule
+\end{tabular}
