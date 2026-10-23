@@ -1,0 +1,7 @@
+variant,comparison,sizes,pattern,n_star,last_crossing,crossing_from,crossing_to,resamples,share_one_crossing,share_reversal,share_reversal_then_crossing,share_never_overtaken,share_never_ahead,share_several,resamples_one_crossing,n_star_low,n_star_high,resamples_reversal_then_crossing,last_crossing_low,last_crossing_high
+noise,rf,7,reversal,,,,,1000,0.0,0.859,0.021,0.0,0.0,0.12,0,,,21,1963.1126292448926,4830.192273851206
+noise,gbm,7,reversal_then_crossing,,1943.7558498574401,1000,2000,1000,0.0,0.013,0.943,0.0,0.0,0.044,0,,,943,1525.07564793463,4214.9566440824
+noise,best,7,reversal_then_crossing,,1943.7558498574401,1000,2000,1000,0.0,0.013,0.943,0.0,0.0,0.044,0,,,943,1525.07564793463,4214.9566440824
+split2,rf,7,reversal,,,,,1000,0.0,0.777,0.0,0.092,0.0,0.131,0,,,0,,
+split2,gbm,7,several,,,,,1000,0.0,0.559,0.002,0.046,0.0,0.393,0,,,2,4871.943904352569,4969.714438943875
+split2,best,7,several,,,,,1000,0.0,0.568,0.002,0.043,0.0,0.387,0,,,2,4871.943904352569,4969.714438943875
