@@ -33,7 +33,14 @@
 # draw, one whole experiment of stage 3 as a function that stage 3 and stage 6
 # share, the steps of stage 4 on the files of one experiment, and the check
 # with twice the trees), with the scores of one configuration on the test rows
-# in their own function, which that check reuses.
+# in their own function, which that check reuses. Later asked for (23 October
+# 2026, step 7 of section 10 of docs/build_plan.md, after Yu's run of stage
+# 6): the functions of stage 7 (the tables of the paper, written as .csv and
+# as LaTeX, and the pieces its figures are drawn with), the steps of stage 4
+# without the bootstrap in their own function, which stage 6 now calls, the
+# ridge line as an optional line of the learning curves, and, in the check
+# with twice the trees, the number of draws in which more trees lowered the
+# error.
 """Code used by more than one notebook (Requirement 4.9).
 
 Every notebook imports this module in its first code cell, before pandas,
@@ -898,11 +905,15 @@ def tune(summary):
     return tuned.sort_values(["size", "model"]).reset_index(drop=True)
 
 
-def line_configs(tuned):
-    """The configuration each line follows at each size: ppml, rf and gbm at their tuned setting, mean and tree."""
+def line_configs(tuned, lines=LINES):
+    """The configuration each line follows at each size: ppml, rf and gbm at their tuned setting, mean and tree.
+
+    Stage 7 adds the ridge line through lines. Every line other than rf and gbm
+    has one configuration, named as the line.
+    """
     rows = []
     for size in sorted(tuned["size"].unique()):
-        for line in LINES:
+        for line in lines:
             if line in ("rf", "gbm"):
                 at_size = tuned[(tuned["size"] == size) & (tuned["model"] == line)]
                 config = at_size["config"].item()
@@ -2114,6 +2125,19 @@ def selection_confusion_table(runs):
 CHECKS = ("noise", "split2", "trees2x")
 
 
+def experiment_gaps(runs, components):
+    """Steps 1, 2 and 4 of stage 4 on the files of one experiment: the summary, the tuned rf and gbm, and the gaps.
+
+    The gaps have the columns of gaps.csv, the win counts of ppml included.
+    Stage 6 runs it inside experiment_cutoff, and stage 7 runs it again on the
+    files of stages 3 and 6 to draw the gaps, without the bootstrap.
+    """
+    summary = summarise(runs)
+    tuned = tune(summary)
+    wins = ppml_wins(per_draw(runs, line_configs(tuned)), better_ensemble(tuned))
+    return summary, tuned, gaps_with_wins(gaps(components, runs, tuned), wins)
+
+
 def experiment_cutoff(runs, components, year, split_id, resamples):
     """Steps 1, 2 and 4 to 6 of stage 4 on the files of one experiment.
 
@@ -2125,10 +2149,7 @@ def experiment_cutoff(runs, components, year, split_id, resamples):
     Returns the tuned settings, the table of gaps (the columns of gaps.csv)
     and the cutoff (the columns of cutoff.csv).
     """
-    summary = summarise(runs)
-    tuned = tune(summary)
-    wins = ppml_wins(per_draw(runs, line_configs(tuned)), better_ensemble(tuned))
-    gap_table = gaps_with_wins(gaps(components, runs, tuned), wins)
+    _, tuned, gap_table = experiment_gaps(runs, components)
     crossing_table = crossings(gap_table)
     matrices = candidate_matrices(runs)
     check_resampling(matrices, tuned, gap_table)
@@ -2240,9 +2261,10 @@ def trees2x_differences(check_runs, base_runs, tuned):
     check's test deviance minus that of the tuned configuration of the same
     model on the same training sample in base_runs (dev_runs.csv). Returns, per
     configuration, the mean of both, the mean difference, its paired standard
-    error, and the largest difference on one draw relative to the base value:
-    for the configurations that are the tuned ones themselves, this checks
-    that the check redid the base run.
+    error, the draws in which the check's test deviance is the lower one
+    (draws_lower), and the largest difference on one draw relative to the base
+    value: for the configurations that are the tuned ones themselves, this
+    checks that the check redid the base run.
     """
     rows = []
     for config, of_config in check_runs.groupby("config", sort=False):
@@ -2256,6 +2278,537 @@ def trees2x_differences(check_runs, base_runs, tuned):
         rows.append({"size": size, "model": model, "config": config, "base_config": base_config,
                      "draws": len(merged), "mean": merged["test_deviance"].mean(),
                      "base_mean": merged["test_deviance_base"].mean(), "difference": difference.mean(),
-                     "se_difference": paired_se(difference),
+                     "se_difference": paired_se(difference), "draws_lower": int((difference < 0).sum()),
                      "largest_relative_difference": float((difference.abs() / merged["test_deviance_base"]).max())})
     return pd.DataFrame(rows)
+
+
+# ---------------------------------------------------------------------------
+# Stage 7: the figures and tables of the paper (section 6)
+# ---------------------------------------------------------------------------
+
+# The lines of the learning curves of the paper: the five of the checkpoint and
+# the ridge line, which Yu added at the checkpoint (decision 20).
+CURVE_LINES = LINES + ("ridge",)
+
+# One colour and one marker for each line, method and gap, the same in every
+# figure. The colours come from a categorical palette checked for readers with
+# colour blindness, in its fixed order: ppml to tree as in the checkpoint
+# figure (03b), then ridge and the two selectors. Dark grey is for what is not
+# a model of its own: best_of_three, which looks at the test set, and the error
+# gap, which is the bias gap minus the variance gap. Every line also has its
+# own marker, so that no two lines are told apart by colour alone.
+COLOURS = {
+    "ppml": "#2a78d6", "rf": "#eb6834", "gbm": "#1baf7a", "mean": "#eda100", "tree": "#e87ba4",
+    "ridge": "#008300", "size_rule": "#6250d6", "cv_select": "#e34948", "best_of_three": "#52514e",
+    "error_gap": "#52514e", "bias_gap": "#6250d6", "variance_gap": "#e34948",
+}
+MARKERS = {
+    "ppml": "o", "rf": "s", "gbm": "^", "mean": "D", "tree": "v", "ridge": "P",
+    "size_rule": "o", "cv_select": "s", "best_of_three": "D",
+    "error_gap": "o", "bias_gap": "s", "variance_gap": "^",
+}
+TEXT_COLOUR = "#52514e"
+SIZE_LABEL = "Training size (ordered country pairs)"
+DEVIANCE_LABEL = "Mean Poisson deviance (thousand USD)"
+GAP_LABEL = "Gap / mean test deviance of the ensemble"
+
+# The names used in the tables of the paper.
+VARIABLE_NAMES = {
+    "tradeflow_baci": "Trade flow (thousand USD)",
+    "ln_gdp_o": "Log GDP, origin (GDP in thousand USD)",
+    "ln_gdp_d": "Log GDP, destination (GDP in thousand USD)",
+    "ln_dist": "Log distance (distance in km)",
+    "contig": "Contiguous (1 = yes)",
+    "comlang_off": "Common official language (1 = yes)",
+    "col_dep_ever": "Colonial tie, ever (1 = yes)",
+    "comcol": "Common colonizer after 1945 (1 = yes)",
+    "fta_wto": "Regional trade agreement (1 = yes)",
+}
+COMPARISON_NAMES = {"rf": "ppml vs tuned rf", "gbm": "ppml vs tuned gbm", "best": "ppml vs better ensemble",
+                    "ridge_best": "ridge vs better ensemble"}
+SELECTOR_NAMES = {"size_rule": "size rule", "cv_select": "cross-validation"}
+EDGE_NAMES = {"rf_features": "predictors", "rf_min_leaf": "leaf", "gbm_depth": "depth", "gbm_trees": "trees"}
+
+
+# --- Numbers as text ---------------------------------------------------------
+
+def thousands(value):
+    """A number rounded to a whole number, with commas between thousands; empty when missing."""
+    return "" if pd.isna(value) else f"{value:,.0f}"
+
+
+def decimals(value, places):
+    """A number with places digits after the point; empty when missing."""
+    return "" if pd.isna(value) else f"{value:.{places}f}"
+
+
+def with_se(value, se):
+    """A mean and, in brackets, its standard error, both rounded to whole numbers."""
+    return f"{thousands(value)} ({thousands(se)})"
+
+
+def flow_text(value):
+    """A trade flow in thousand USD: a whole number, or three significant digits below 1 (a flow is never zero)."""
+    return thousands(value) if abs(value) >= 1 else f"{value:.3g}"
+
+
+def yes(flag):
+    """'yes' where flag is true, empty where it is false or missing."""
+    return "yes" if not pd.isna(flag) and bool(flag) else ""
+
+
+# --- LaTeX ---------------------------------------------------------------------
+
+# The characters LaTeX reads as commands, and how to write each as text.
+LATEX_SPECIAL = {"\\": r"\textbackslash{}", "&": r"\&", "%": r"\%", "$": r"\$", "#": r"\#", "_": r"\_",
+                 "{": r"\{", "}": r"\}", "~": r"\textasciitilde{}", "^": r"\textasciicircum{}"}
+
+
+def latex_cell(text):
+    """One cell as LaTeX text: special characters escaped, and a minus sign rather than a hyphen before a number."""
+    text = "".join(LATEX_SPECIAL.get(character, character) for character in str(text))
+    if text.startswith("-") and text[1:2].isdigit():
+        text = "$-$" + text[1:]
+    return text
+
+
+def latex_tabular(table, align):
+    """A table whose cells are text, as a LaTeX tabular with the rules of the booktabs package.
+
+    align has one letter per column: l for text, r for numbers. Only the
+    tabular is written; the paper puts it in a table with Yu's caption.
+    pandas' own DataFrame.to_latex is not used, because it needs jinja2, which
+    requirements.txt does not list (section 5 of the plan).
+    """
+    assert len(align) == len(table.columns), "align needs one letter per column."
+    lines = [rf"\begin{{tabular}}{{{align}}}", r"\toprule",
+             " & ".join(latex_cell(column) for column in table.columns) + r" \\", r"\midrule"]
+    for row in table.itertuples(index=False):
+        lines.append(" & ".join(latex_cell(cell) for cell in row) + r" \\")
+    lines += [r"\bottomrule", r"\end{tabular}"]
+    return "\n".join(lines) + "\n"
+
+
+# --- The tables ----------------------------------------------------------------
+# Each table has two functions: one builds it with full numbers, written as
+# .csv, and one turns it into the text of the paper, written as .tex, with the
+# letters that align its columns.
+
+def cleaning_table(log, clean):
+    """tab_cleaning: the rows of each year in the extract and after each step of stage 2 (cleaning_log.csv).
+
+    The first row is the extract. The rows left after the last step must be
+    the rows of that year in gravity_clean.csv.
+    """
+    years = sorted(int(year) for year in log["year"].unique())
+    first_step = log["step"].min()
+    extract = {"step": 0, "dropped_because": "(rows in the extract)"}
+    for year in years:
+        of_year = log[log["year"] == year]
+        extract[f"rows_dropped_{year}"] = pd.NA
+        extract[f"rows_left_{year}"] = of_year.loc[of_year["step"] == first_step, "rows_before"].item()
+    rows = [extract]
+    for step, of_step in log.groupby("step", sort=True):
+        assert of_step["dropped_because"].nunique() == 1, f"Step {step} has two reasons in cleaning_log.csv."
+        row = {"step": step, "dropped_because": of_step["dropped_because"].iloc[0]}
+        for year in years:
+            in_year = of_step[of_step["year"] == year]
+            row[f"rows_dropped_{year}"] = in_year["rows_dropped"].item()
+            row[f"rows_left_{year}"] = in_year["rows_left"].item()
+        rows.append(row)
+    table = pd.DataFrame(rows)
+    for year in years:
+        assert table[f"rows_left_{year}"].iloc[-1] == (clean["year"] == year).sum(), \
+            f"cleaning_log.csv and gravity_clean.csv do not have the same rows in {year}."
+        table[f"rows_dropped_{year}"] = table[f"rows_dropped_{year}"].astype("Int64")
+    return table
+
+
+def cleaning_text(table):
+    """tab_cleaning as text: a pair of columns, rows dropped and rows left, for each year."""
+    years = [column.removeprefix("rows_left_") for column in table.columns if column.startswith("rows_left_")]
+    text = pd.DataFrame({"Step": table["step"].astype(str), "Rows dropped because": table["dropped_because"]})
+    for year in years:
+        text[f"{year}: dropped"] = table[f"rows_dropped_{year}"].map(thousands)
+        text[f"{year}: left"] = table[f"rows_left_{year}"].map(thousands)
+    return text, "ll" + "rr" * len(years)
+
+
+def summary_statistics(clean):
+    """tab_summary: for the target and each predictor, and each year, the rows and the summary statistics."""
+    rows = []
+    for variable in [TARGET] + PREDICTORS:
+        for year, of_year in clean.groupby("year", sort=True):
+            values = of_year[variable]
+            rows.append({"variable": variable, "year": year, "rows": len(values), "mean": values.mean(),
+                         "sd": values.std(), "min": values.min(), "median": values.median(), "max": values.max()})
+    return pd.DataFrame(rows)
+
+
+def statistic_text(variable, value):
+    """A statistic of one variable: the flow in thousand USD, the logs with two decimals, the indicators with three."""
+    if variable == TARGET:
+        return flow_text(value)
+    if variable in INDICATORS:
+        return decimals(value, 3)
+    return decimals(value, 2)
+
+
+def summary_text(table):
+    """tab_summary as text: one row per variable and year."""
+    rows = []
+    for row in table.itertuples():
+        text = {"Variable": VARIABLE_NAMES[row.variable], "Year": str(row.year), "Rows": thousands(row.rows)}
+        for column, name in [("mean", "Mean"), ("sd", "SD"), ("min", "Min"), ("median", "Median"), ("max", "Max")]:
+            text[name] = statistic_text(row.variable, getattr(row, column))
+        rows.append(text)
+    return pd.DataFrame(rows), "llrrrrrr"
+
+
+def setting_text(row):
+    """The tuned setting of rf or gbm in words, from a row with the columns of SETTING_COLUMNS; empty for ppml."""
+    if row["model"] == "rf":
+        return f"{int(row['rf_features'])} of {len(PREDICTORS)} predictors, leaf {int(row['rf_min_leaf'])}"
+    if row["model"] == "gbm":
+        return f"depth {int(row['gbm_depth'])}, {int(row['gbm_trees']):,} trees"
+    return ""
+
+
+def edge_text(edges):
+    """The column edges of size_rule.csv in short words: which setting sits at which end of its grid, and why.
+
+    "smallest possible" or "largest possible": the grid cannot go further
+    (one predictor more than all eight, or a leaf below 1, does not exist).
+    "largest in the grid": the grid could have gone further, but the one round
+    of the rule Grid edges was used at the checkpoint (decision 19).
+    """
+    if pd.isna(edges) or edges == "":
+        return ""
+    parts = []
+    for part in edges.split("; "):
+        setting, reason = part.split(": ", 1)
+        column, side = setting.split(" ")
+        end = "smallest" if side == "below" else "largest"
+        if reason == CANNOT_EXTEND:
+            parts.append(f"{EDGE_NAMES[column]}: {end} possible")
+        else:
+            assert reason == GRID_LIMIT, f"An edge in size_rule.csv has a reason stage 7 does not know: {reason}"
+            parts.append(f"{EDGE_NAMES[column]}: {end} in the grid")
+    return "; ".join(parts)
+
+
+def tuned_table(rule):
+    """tab_tuned: size_rule.csv, with each tuned setting and each edge of its grid in words."""
+    table = rule.copy()
+    table["setting"] = [setting_text(row) for _, row in table.iterrows()]
+    table["edge_of_grid"] = [edge_text(edges) for edges in table["edges"]]
+    return table[["size", "model", "config", "setting", "draws", "mean", "se", "se_unreliable", "median", "chosen",
+                  "edge_of_grid"]]
+
+
+def tuned_text(table):
+    """tab_tuned as text: one row per size and model."""
+    text = pd.DataFrame({
+        "Size": table["size"].map(thousands), "Model": table["model"], "Setting": table["setting"],
+        "Mean test deviance": table["mean"].map(thousands), "SE": table["se"].map(thousands),
+        "One draw over half": table["se_unreliable"].map(yes), "Median": table["median"].map(thousands),
+        "Size rule picks": table["chosen"].map(yes), "Edge of the grid": table["edge_of_grid"],
+    })
+    return text, "rllrrlrll"
+
+
+def with_reversal(cutoff, gap_table):
+    """A cutoff of stage 4 or 6 with the two sizes around a reversal, found on its error gaps (decision 12).
+
+    analysis_cutoff.csv has reversal_from and reversal_to; cutoff.csv and
+    check_cutoff.csv do not. reversal_sizes is the function stage 5 uses.
+    """
+    table = cutoff.copy()
+    reversal = []
+    for row in table.itertuples():
+        of_comparison = gap_table[gap_table["comparison"] == row.comparison].sort_values("size")
+        reversal.append(reversal_sizes(of_comparison["size"], of_comparison["error_gap"], row.pattern))
+    table["reversal_from"] = pd.array([sizes["reversal_from"] for sizes in reversal], dtype="Int64")
+    table["reversal_to"] = pd.array([sizes["reversal_to"] for sizes in reversal], dtype="Int64")
+    return table
+
+
+CUTOFF_OVERVIEW_COLUMNS = (
+    ["year", "run", "comparison", "sizes", "pattern", "reversal_from", "reversal_to", "n_star", "last_crossing",
+     "crossing_from", "crossing_to", "resamples"] + [f"share_{pattern}" for pattern in PATTERNS]
+    + ["resamples_one_crossing", "n_star_low", "n_star_high", "resamples_reversal_then_crossing",
+       "last_crossing_low", "last_crossing_high"])
+
+
+def cutoff_overview(parts):
+    """tab_cutoff: the cutoff of every comparison and run, one row each.
+
+    parts is a list of (year, run, cutoff table): the base run, noise and
+    split2 in the development year, each with reversal_from and reversal_to
+    added by with_reversal, then the analysis year, whose comparison best is
+    the test of H1.
+    """
+    tables = [cutoff.assign(year=year, run=run) for year, run, cutoff in parts]
+    table = pd.concat(tables, ignore_index=True)[CUTOFF_OVERVIEW_COLUMNS]
+    # Sizes are whole numbers, empty where the pattern has none.
+    for column in ["reversal_from", "reversal_to", "crossing_from", "crossing_to"]:
+        table[column] = table[column].astype("Int64")
+    return table
+
+
+def interval_text(low, high, resamples):
+    """A bootstrap interval of a size, with the number of resamples it rests on."""
+    return f"{thousands(low)} to {thousands(high)} ({resamples:,})"
+
+
+def cutoff_text(table):
+    """tab_cutoff as text: the pattern, the reversal, the crossing with its interval, and the share of each pattern."""
+    rows = []
+    for row in table.itertuples():
+        # The crossing and the interval of the pattern found on every draw.
+        crossing, interval = "", ""
+        if row.pattern == "one_crossing":
+            crossing = f"n* {thousands(row.n_star)}"
+            interval = interval_text(row.n_star_low, row.n_star_high, row.resamples_one_crossing)
+        elif row.pattern == "reversal_then_crossing":
+            crossing = f"last {thousands(row.last_crossing)}"
+            interval = interval_text(row.last_crossing_low, row.last_crossing_high,
+                                     row.resamples_reversal_then_crossing)
+        reversal = "" if pd.isna(row.reversal_from) else f"{thousands(row.reversal_from)} to {thousands(row.reversal_to)}"
+        text = {"Year": str(row.year), "Run": row.run, "Comparison": COMPARISON_NAMES[row.comparison],
+                "Pattern": row.pattern.replace("_", " "), "Reversal": reversal, "Crossing": crossing,
+                "95% interval (resamples)": interval}
+        for pattern in PATTERNS:
+            text[pattern.replace("_", " ")] = decimals(getattr(row, f"share_{pattern}"), 3)
+        rows.append(text)
+    return pd.DataFrame(rows), "lllllrr" + "r" * len(PATTERNS)
+
+
+def selection_table(summary):
+    """tab_selection: at each size of the analysis year, the size rule against cross-validated selection (H2).
+
+    From the size_rule and cv_select rows of analysis_summary.csv: the model the
+    size rule picks, the mean test deviance of each selector with its standard
+    error, the paired difference size rule minus cross-validation with its
+    standard error and the draws it is taken on, within_2se (the test of H2),
+    the paired difference size rule minus best_of_three, and the fits and
+    seconds per draw of each selector.
+    """
+    rows = []
+    for size, at_size in summary.groupby("size", sort=True):
+        rule = at_size[at_size["method"] == "size_rule"].iloc[0]
+        cv = at_size[at_size["method"] == "cv_select"].iloc[0]
+        rows.append({
+            "size": size, "size_rule_picks": rule["model"],
+            "size_rule_draws": rule["draws"], "size_rule_mean": rule["mean"], "size_rule_se": rule["se"],
+            "cv_select_draws": cv["draws"], "cv_select_mean": cv["mean"], "cv_select_se": cv["se"],
+            "minus_cv_select": rule["minus_cv_select"], "se_minus_cv_select": rule["se_minus_cv_select"],
+            "draws_with_cv_select": rule["draws_with_cv_select"], "within_2se": rule["within_2se"],
+            "minus_best_of_three": rule["minus_best_of_three"],
+            "se_minus_best_of_three": rule["se_minus_best_of_three"],
+            "size_rule_fits": rule["fits"], "cv_select_fits": cv["fits"],
+            "size_rule_seconds": rule["seconds"], "cv_select_seconds": cv["seconds"],
+        })
+    return pd.DataFrame(rows)
+
+
+def selection_text(table):
+    """tab_selection as text: each mean with its standard error in brackets."""
+    text = pd.DataFrame({
+        "Size": table["size"].map(thousands), "Size rule picks": table["size_rule_picks"],
+        "Size rule": [with_se(m, s) for m, s in zip(table["size_rule_mean"], table["size_rule_se"])],
+        "Cross-validation": [with_se(m, s) for m, s in zip(table["cv_select_mean"], table["cv_select_se"])],
+        "Rule minus CV": [with_se(m, s) for m, s in zip(table["minus_cv_select"], table["se_minus_cv_select"])],
+        "Within 2 SE": table["within_2se"].map(yes),
+        "Rule minus best of three": [with_se(m, s) for m, s in zip(table["minus_best_of_three"],
+                                                                     table["se_minus_best_of_three"])],
+        "Fits: rule, CV": [f"{rule}, {cv}" for rule, cv in zip(table["size_rule_fits"], table["cv_select_fits"])],
+        "Seconds: rule, CV": [f"{decimals(rule, 2)}, {decimals(cv, 2)}"
+                              for rule, cv in zip(table["size_rule_seconds"], table["cv_select_seconds"])],
+    })
+    return text, "rlrrrlrrr"
+
+
+def confusion_overall(confusion):
+    """tab_selection_confusion: the rows of selection_confusion.csv over all sizes together, for both selectors."""
+    return confusion[confusion["sizes"] == "all"].drop(columns="sizes").reset_index(drop=True)
+
+
+def confusion_text(table):
+    """tab_selection_confusion as text: the shares and the difference only on the rows total."""
+    text = pd.DataFrame({
+        "Selector": table["selector"].map(SELECTOR_NAMES), "Model picked": table["picked"],
+        "Draws": table["draws"].map(thousands), "Won by ppml": table["won_ppml"].map(thousands),
+        "Won by rf": table["won_rf"].map(thousands), "Won by gbm": table["won_gbm"].map(thousands),
+        "Picked right": [decimals(share, 3) for share in table["share_picked_right"]],
+        "Most frequent winner of each size": [decimals(share, 3) for share in table["share_most_frequent_winner"]],
+        "Minus best of three": ["" if pd.isna(m) else with_se(m, s)
+                                for m, s in zip(table["mean_difference"], table["se_difference"])],
+    })
+    return text, "llrrrrrrr"
+
+
+def checks_table(gap_tables):
+    """tab_checks: ppml against the better ensemble at each size, in the base run and in the checks noise and split2.
+
+    gap_tables maps each run to its gaps, with the columns of gaps.csv. For
+    each size: the better ensemble, its mean test deviance, the error gap with
+    its paired standard error, the draws ppml wins, and the bias and variance
+    gaps in the version rn, the one stages 4 and 6 print.
+    """
+    tables = []
+    for run, gap_table in gap_tables.items():
+        best = gap_table[gap_table["comparison"] == "best"].sort_values("size")
+        tables.append(best.assign(run=run))
+    columns = ["run", "size", "model", "config", "error_ppml", "error_other", "error_gap", "se_error_gap",
+               "within_2se", "ppml_wins", "draws", "bias_gap_rn", "variance_gap_rn"]
+    return pd.concat(tables, ignore_index=True)[columns]
+
+
+def checks_text(table):
+    """tab_checks as text: one row per run and size, in thousand USD."""
+    text = pd.DataFrame({
+        "Run": table["run"], "Size": table["size"].map(thousands), "Better ensemble": table["model"],
+        "Error gap (SE)": [with_se(m, s) for m, s in zip(table["error_gap"], table["se_error_gap"])],
+        "ppml wins": [f"{wins} of {draws}" for wins, draws in zip(table["ppml_wins"], table["draws"])],
+        "Bias gap": table["bias_gap_rn"].map(thousands), "Variance gap": table["variance_gap_rn"].map(thousands),
+    })
+    return text, "lrlrrrr"
+
+
+def trees2x_table(trees2x_runs, base_runs, rule):
+    """tab_trees2x: in the check trees2x, each configuration with more trees against the tuned one of the base run.
+
+    rule holds the rows of size_rule.csv at the size of the check. The tuned
+    configurations, which the check fits again, must equal the base run, as
+    stage 6 checked; they are left out of the table.
+    """
+    differences = trees2x_differences(trees2x_runs, base_runs, rule)
+    again = differences["config"] == differences["base_config"]
+    assert (differences.loc[again, "largest_relative_difference"] <= 1e-9).all(), \
+        "The tuned rows of trees2x differ from dev_runs.csv."
+    table = differences[~again].copy()
+    trees = trees2x_runs.groupby("config")["gbm_trees"].first()
+    base_trees = rule.set_index("config")["gbm_trees"]
+    table["base_trees"] = [RF_TREES if model == "rf" else int(base_trees[config])
+                           for model, config in zip(table["model"], table["base_config"])]
+    table["trees"] = [2 * RF_TREES if model == "rf" else int(trees[config])
+                      for model, config in zip(table["model"], table["config"])]
+    return table[["size", "model", "base_config", "base_trees", "config", "trees", "draws", "base_mean", "mean",
+                  "difference", "se_difference", "draws_lower"]].reset_index(drop=True)
+
+
+def trees2x_text(table):
+    """tab_trees2x as text: one row per configuration with more trees."""
+    text = pd.DataFrame({
+        "Model": table["model"], "Trees, base": table["base_trees"].map(thousands),
+        "Trees, check": table["trees"].map(thousands), "Mean, base": table["base_mean"].map(thousands),
+        "Mean, check": table["mean"].map(thousands),
+        "Difference (SE)": [with_se(m, s) for m, s in zip(table["difference"], table["se_difference"])],
+        "Draws lower": [f"{lower} of {draws}" for lower, draws in zip(table["draws_lower"], table["draws"])],
+    })
+    return text, "lrrrrrr"
+
+
+# --- The figures -----------------------------------------------------------------
+# The notebook makes each figure and its panels with matplotlib; these
+# functions draw on a panel (axes) it passes in.
+
+def size_axis(axes, sizes):
+    """Training size on a log axis, with a tick at each size of the experiment and no other."""
+    axes.set_xscale("log")
+    axes.set_xticks(sizes)
+    axes.set_xticklabels([f"{n:,}" for n in sizes])
+    axes.set_xticks([], minor=True)
+    axes.set_xlim(min(sizes) / 1.25, max(sizes) * 1.25)
+
+
+def axis_limits(values, log):
+    """The limits of a value axis that hold every value given, with room around them.
+
+    On a log axis: from half the smallest positive value to twice the
+    largest. On a linear axis: from the smallest to the largest value, zero
+    included, widened by a tenth of that range on each side.
+    """
+    values = np.asarray(values, dtype=float)
+    values = values[np.isfinite(values)]
+    if log:
+        positive = values[values > 0]
+        return positive.min() / 2, positive.max() * 2
+    low, high = min(values.min(), 0.0), max(values.max(), 0.0)
+    room = (high - low) / 10
+    return low - room, high + room
+
+
+def edge_value(value):
+    """A value drawn at the edge of an axis, as text: a whole number from 100 on, three significant digits below."""
+    return thousands(value) if abs(value) >= 100 else f"{value:.3g}"
+
+
+def draw_line(axes, sizes, values, key, label, limits, written, style="-", band=None, name=None):
+    """One line over the training sizes, in the colour and marker of key, inside the limits of the value axis.
+
+    label goes in the legend (None: no entry). band is None, or the lower and
+    upper edges of a band, shaded in the same colour. A value outside the
+    limits is drawn at the edge of the axis, as a triangle pointing beyond it,
+    with the line's name (name, or else label) and the value written beside
+    it, so that nothing is left out and one extreme value does not flatten
+    every other line. written counts the texts already written at each size
+    and edge of this panel, so that two texts do not overlap. Returns, for the
+    notebook to print, the sizes and values drawn at an edge.
+    """
+    low, high = limits
+    sizes = np.asarray(sizes, dtype=float)
+    values = np.asarray(values, dtype=float)
+    colour = COLOURS[key]
+    if band is not None:
+        axes.fill_between(sizes, np.clip(band[0], low, high), np.clip(band[1], low, high), color=colour,
+                          alpha=0.12, linewidth=0)
+    inside = (values >= low) & (values <= high)
+    beyond = ~inside & np.isfinite(values)
+    axes.plot(sizes, np.clip(values, low, high), color=colour, marker=MARKERS[key], markersize=5,
+              linewidth=1.8 if style == "-" else 1.3, linestyle=style, label=label,
+              markevery=list(np.flatnonzero(inside)))
+    marked = []
+    for size, value in zip(sizes[beyond], values[beyond]):
+        above = value > high
+        edge = "top" if above else "bottom"
+        count = written.get((size, edge), 0)
+        written[(size, edge)] = count + 1
+        axes.plot(size, high if above else low, marker="^" if above else "v", color=colour, markersize=8,
+                  clip_on=False, zorder=5)
+        shift = -11 - 9 * count if above else 3 + 9 * count
+        # A white box behind the text keeps it readable where a line passes under it.
+        axes.annotate(f"{name or label}: {edge_value(value)}", (size, high if above else low), xytext=(7, shift),
+                      textcoords="offset points", fontsize=7, color=TEXT_COLOUR,
+                      bbox={"facecolor": "white", "edgecolor": "none", "pad": 0.5, "alpha": 0.85})
+        marked.append({"size": int(size), "value": value})
+    return marked
+
+
+def gap_shares(gap_table):
+    """The gaps of gap_table divided by the mean test deviance of the ensemble they compare ppml with.
+
+    A share is easier to compare across sizes than a gap in thousand USD,
+    because every error falls as the training size grows. The sign of each gap
+    does not change, so neither do the pattern and n*, and the error gap is
+    still the bias gap minus the variance gap.
+    """
+    table = gap_table.copy()
+    for column in ["error_gap", "bias_gap_rn", "variance_gap_rn"]:
+        table[f"{column}_share"] = table[column] / table["error_other"]
+    return table
+
+
+def crossing_marker(row):
+    """The crossing a figure marks for one row of a cutoff table: its size, interval and name, or None.
+
+    n* on one_crossing and last_crossing on reversal_then_crossing, each with
+    its bootstrap interval; no other pattern has a crossing (decision 12).
+    """
+    if row["pattern"] == "one_crossing":
+        return row["n_star"], row["n_star_low"], row["n_star_high"], "n*"
+    if row["pattern"] == "reversal_then_crossing":
+        return row["last_crossing"], row["last_crossing_low"], row["last_crossing_high"], "last crossing"
+    return None
