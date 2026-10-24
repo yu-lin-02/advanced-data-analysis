@@ -40,7 +40,9 @@
 # without the bootstrap in their own function, which stage 6 now calls, the
 # ridge line as an optional line of the learning curves, and, in the check
 # with twice the trees, the number of draws in which more trees lowered the
-# error.
+# error. Later asked for (24 October 2026, decision 23 of docs/build_plan.md):
+# the tables of the models and of the variables, written from the code and
+# checked on the files, so that no table of the paper is typed by hand.
 """Code used by more than one notebook (Requirement 4.9).
 
 Every notebook imports this module in its first code cell, before pandas,
@@ -2394,6 +2396,152 @@ def latex_tabular(table, align):
 # Each table has two functions: one builds it with full numbers, written as
 # .csv, and one turns it into the text of the paper, written as .tex, with the
 # letters that align its columns.
+
+# The scikit-learn parameters that tab_models shows as fixed for each model:
+# those that shape the fit and are the same on every draw. Left out are the
+# seed and the threads, the out-of-bag score of the forest, which changes no
+# prediction, and the parameters that are tuned.
+FIXED_PARAMETERS = {
+    "ppml": ["alpha", "solver"],
+    "rf": ["n_estimators", "criterion", "bootstrap"],
+    "gbm": ["loss", "learning_rate", "max_iter", "min_samples_leaf", "max_leaf_nodes", "early_stopping"],
+}
+# The tuned settings, by the columns of CONFIGURATIONS that hold them, and the
+# name tab_models gives each. The number of trees of gbm is not a parameter:
+# the predictions after that many trees are read from one fit of max_iter trees.
+TUNED_PARAMETERS = {
+    "ppml": {},
+    "rf": {"rf_features": "max_features (predictors per split)", "rf_min_leaf": "min_samples_leaf"},
+    "gbm": {"gbm_depth": "max_depth", "gbm_trees": "trees (read from the one fit)"},
+}
+
+
+def parameter_text(value):
+    """A fixed setting as text: a whole number with commas between thousands, anything else as Python writes it."""
+    if isinstance(value, (int, np.integer)) and not isinstance(value, bool):
+        return f"{value:,}"
+    return str(value)
+
+
+def models_table(runs):
+    """tab_models: the settings of ppml, rf and gbm, one row per setting, fixed or tuned.
+
+    The fixed settings are read from the estimators that make_ppml, make_rf
+    and make_gbm build, and the values tried for the tuned ones from
+    CONFIGURATIONS, the list stage 3 scores, in the order of the grid. So the
+    table shows the settings of the code itself. runs (dev_runs.csv) must hold
+    exactly the configurations of CONFIGURATIONS for each model, and gbm must
+    be fitted with the largest number of trees tried.
+    """
+    configurations = pd.DataFrame(CONFIGURATIONS)
+    estimators = {"ppml": make_ppml(), "rf": make_rf(RF_MAX_FEATURES[0], RF_MIN_LEAF[0], seed=0),
+                  "gbm": make_gbm(GBM_DEPTHS[0], seed=0)}
+    assert estimators["gbm"].get_params()["max_iter"] == max(GBM_TREE_COUNTS), \
+        "gbm is not fitted with the largest number of trees tried."
+    rows = []
+    for model in CANDIDATES:
+        of_model = configurations[configurations["model"] == model]
+        assert set(runs.loc[runs["model"] == model, "config"]) == set(of_model["config"]), \
+            f"The {model} configurations of dev_runs.csv are not those of CONFIGURATIONS. Stop and report."
+        estimator = estimators[model]
+        rows.append({"model": model, "setting": "estimator", "values": type(estimator).__name__, "tuned": False})
+        for column, name in TUNED_PARAMETERS[model].items():
+            values = [int(value) for value in of_model[column].drop_duplicates()]
+            rows.append({"model": model, "setting": name, "values": ", ".join(f"{value:,}" for value in values),
+                         "tuned": True})
+        parameters = estimator.get_params()
+        for name in FIXED_PARAMETERS[model]:
+            rows.append({"model": model, "setting": name, "values": parameter_text(parameters[name]), "tuned": False})
+    return pd.DataFrame(rows)
+
+
+def models_text(table):
+    """tab_models as text: each model named on its first row only, and "yes" where the grid search picks the value."""
+    first = table["model"] != table["model"].shift()
+    text = pd.DataFrame({"Model": table["model"].where(first, ""), "Setting": table["setting"],
+                         "Values": table["values"], "Tuned": table["tuned"].map(yes)})
+    return text, "llll"
+
+
+# The columns of the extract that stage 1 saves, as tab_variables shows them:
+# the name in the paper, the columns of the CEPII file, their unit in the CEPII
+# documentation, what stage 2 does with them, and the columns they become in
+# gravity_clean.csv. variables_table checks each treatment on the two files.
+VARIABLES_USED = [
+    ("Trade flow from i to j", ["tradeflow_baci"], "Thousand current USD", "target", ["tradeflow_baci"]),
+    ("GDP of origin and destination", ["gdp_o", "gdp_d"], "Thousand current USD", "log", ["ln_gdp_o", "ln_gdp_d"]),
+    ("Distance", ["distw_harmonic"], "Kilometres", "log", ["ln_dist"]),
+    ("Contiguous", ["contig"], "0 or 1", "as_is", ["contig"]),
+    ("Common official language", ["comlang_off"], "0 or 1", "as_is", ["comlang_off"]),
+    ("Colonial tie, ever", ["col_dep_ever"], "0 or 1", "as_is", ["col_dep_ever"]),
+    ("Common colonizer after 1945", ["comcol"], "0 or 1", "as_is", ["comcol"]),
+    ("Regional trade agreement", ["fta_wto"], "0 or 1", "as_is", ["fta_wto"]),
+    ("Country exists in that year", ["country_exists_o", "country_exists_d"], "0 or 1", "filter", []),
+    ("Year", ["year"], "Calendar year", "key", ["year"]),
+    ("Country identifiers", ["country_id_o", "country_id_d"], "Text", "key", ["country_id_o", "country_id_d"]),
+    ("ISO3 country codes", ["iso3_o", "iso3_d"], "Text", "unused", []),
+]
+TREATMENTS = {"target": "Target, in levels", "log": "Natural log", "as_is": "As is", "filter": "Filter only",
+              "key": "Key of the row", "unused": "Not used"}
+
+
+def variables_table(extract, clean):
+    """tab_variables: the columns of the extract, their unit and what stage 2 does with them (VARIABLES_USED).
+
+    Checked on the two files before the table is built: the table lists every
+    column of the extract, and the columns it says they become are those of
+    gravity_clean.csv (with pair_id, which stage 2 builds from the country
+    identifiers), the predictors being PREDICTORS and the target TARGET.
+    Every row of gravity_clean.csv is one row of the extract, and on those rows
+    a column kept "as is" or as the target has the extract's values, a
+    "natural log" column is the log of the extract's column, a filter column
+    is 1, and a column whose unit is "0 or 1" holds only 0 and 1.
+    """
+    key = ["year", "country_id_o", "country_id_d"]
+    listed, becomes, predictors, target = [], [], [], []
+    for _, columns, _, treatment, cleaned in VARIABLES_USED:
+        listed += columns
+        becomes += cleaned
+        if treatment in ("log", "as_is"):
+            predictors += cleaned
+        if treatment == "target":
+            target += cleaned
+    assert sorted(listed) == sorted(extract.columns), \
+        f"VARIABLES_USED and the extract differ in these columns: {sorted(set(listed) ^ set(extract.columns))}"
+    assert sorted(becomes + ["pair_id"]) == sorted(clean.columns), \
+        f"VARIABLES_USED and gravity_clean.csv differ in these columns: {sorted(set(becomes + ['pair_id']) ^ set(clean.columns))}"
+    assert predictors == PREDICTORS, f"The predictors of VARIABLES_USED are {predictors}, not PREDICTORS."
+    assert target == [TARGET], f"The target of VARIABLES_USED is {target}, not TARGET."
+
+    # Each row of gravity_clean.csv beside its row of the extract. A column with
+    # the same name in both files takes the suffix _extract on the extract's side.
+    both = clean.merge(extract, on=key, how="left", suffixes=("", "_extract"), validate="one_to_one", indicator=True)
+    assert (both["_merge"] == "both").all(), "A row of gravity_clean.csv is not in the extract. Stop and report."
+    rows = []
+    for name, columns, unit, treatment, cleaned in VARIABLES_USED:
+        for position, column in enumerate(columns):
+            values = both[f"{column}_extract" if column in clean.columns and column not in key else column]
+            if unit == "0 or 1":
+                assert values.isin([0, 1]).all(), f"{column} is not 0 or 1 on every row kept. Stop and report."
+            if treatment in ("target", "as_is"):
+                assert np.allclose(both[cleaned[position]], values, rtol=1e-12, atol=0), \
+                    f"{cleaned[position]} in gravity_clean.csv is not {column} of the extract. Stop and report."
+            if treatment == "log":
+                assert np.allclose(both[cleaned[position]], np.log(values), rtol=1e-12, atol=0), \
+                    f"{cleaned[position]} in gravity_clean.csv is not the log of {column}. Stop and report."
+            if treatment == "filter":
+                assert (values == 1).all(), f"A row kept in gravity_clean.csv has {column} 0. Stop and report."
+        rows.append({"variable": name, "columns": ", ".join(columns), "unit": unit, "treatment": TREATMENTS[treatment],
+                     "cleaned_columns": ", ".join(cleaned)})
+    return pd.DataFrame(rows)
+
+
+def variables_text(table):
+    """tab_variables as text: the variable, its columns in the CEPII file, the unit and the treatment."""
+    text = pd.DataFrame({"Variable": table["variable"], "Column in the CEPII file": table["columns"],
+                         "Unit": table["unit"], "Treatment": table["treatment"]})
+    return text, "llll"
+
 
 def cleaning_table(log, clean):
     """tab_cleaning: the rows of each year in the extract and after each step of stage 2 (cleaning_log.csv).
