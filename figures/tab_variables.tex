@@ -1,0 +1,18 @@
+\begin{tabular}{llll}
+\toprule
+Variable & Column in the CEPII file & Unit & Treatment \\
+\midrule
+Trade flow from i to j & tradeflow\_baci & Thousand current USD & Target, in levels \\
+GDP of origin and destination & gdp\_o, gdp\_d & Thousand current USD & Natural log \\
+Distance & distw\_harmonic & Kilometres & Natural log \\
+Contiguous & contig & 0 or 1 & As is \\
+Common official language & comlang\_off & 0 or 1 & As is \\
+Colonial tie, ever & col\_dep\_ever & 0 or 1 & As is \\
+Common colonizer after 1945 & comcol & 0 or 1 & As is \\
+Regional trade agreement & fta\_wto & 0 or 1 & As is \\
+Country exists in that year & country\_exists\_o, country\_exists\_d & 0 or 1 & Filter only \\
+Year & year & Calendar year & Key of the row \\
+Country identifiers & country\_id\_o, country\_id\_d & Text & Key of the row \\
+ISO3 country codes & iso3\_o, iso3\_d & Text & Not used \\
+\bottomrule
+\end{tabular}

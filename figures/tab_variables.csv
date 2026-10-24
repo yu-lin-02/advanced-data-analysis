@@ -1,0 +1,13 @@
+variable,columns,unit,treatment,cleaned_columns
+Trade flow from i to j,tradeflow_baci,Thousand current USD,"Target, in levels",tradeflow_baci
+GDP of origin and destination,"gdp_o, gdp_d",Thousand current USD,Natural log,"ln_gdp_o, ln_gdp_d"
+Distance,distw_harmonic,Kilometres,Natural log,ln_dist
+Contiguous,contig,0 or 1,As is,contig
+Common official language,comlang_off,0 or 1,As is,comlang_off
+"Colonial tie, ever",col_dep_ever,0 or 1,As is,col_dep_ever
+Common colonizer after 1945,comcol,0 or 1,As is,comcol
+Regional trade agreement,fta_wto,0 or 1,As is,fta_wto
+Country exists in that year,"country_exists_o, country_exists_d",0 or 1,Filter only,
+Year,year,Calendar year,Key of the row,year
+Country identifiers,"country_id_o, country_id_d",Text,Key of the row,"country_id_o, country_id_d"
+ISO3 country codes,"iso3_o, iso3_d",Text,Not used,

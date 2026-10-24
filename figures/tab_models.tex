@@ -1,0 +1,24 @@
+\begin{tabular}{llll}
+\toprule
+Model & Setting & Values & Tuned \\
+\midrule
+ppml & estimator & PoissonRegressor &  \\
+ & alpha & 0 &  \\
+ & solver & newton-cholesky &  \\
+rf & estimator & RandomForestRegressor &  \\
+ & max\_features (predictors per split) & 8, 3 & yes \\
+ & min\_samples\_leaf & 1, 5, 20 & yes \\
+ & n\_estimators & 100 &  \\
+ & criterion & poisson &  \\
+ & bootstrap & True &  \\
+gbm & estimator & HistGradientBoostingRegressor &  \\
+ & max\_depth & 1, 2, 3, 5, 7 & yes \\
+ & trees (read from the one fit) & 25, 50, 100, 200, 300, 400, 500, 750, 1,000 & yes \\
+ & loss & poisson &  \\
+ & learning\_rate & 0.1 &  \\
+ & max\_iter & 1,000 &  \\
+ & min\_samples\_leaf & 20 &  \\
+ & max\_leaf\_nodes & None &  \\
+ & early\_stopping & False &  \\
+\bottomrule
+\end{tabular}
