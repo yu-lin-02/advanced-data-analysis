@@ -1,6 +1,6 @@
 # Semester project: Advanced Data Analysis, HEC Lausanne, autumn 2026
 
-<!-- Outline drafted with Claude (Anthropic). Asked for: a README skeleton in the order given in the course document "Starting and Shipping Your Project". Later asked for (18 October 2026, section 5 of docs/build_plan.md): the seven stages of the build plan and their files. Later asked for (20 October 2026, step 2 of section 10 of the build plan): how to run the checkpoint report. Later asked for (20 October 2026, step 4 of section 10 of the build plan): the date the checkpoint report was run. Later asked for (21 October 2026, decision 19 of the build plan): the report on the rerun of part 1. -->
+<!-- Outline drafted with Claude (Anthropic). Asked for: a README skeleton in the order given in the course document "Starting and Shipping Your Project". Later asked for (18 October 2026, section 5 of docs/build_plan.md): the seven stages of the build plan and their files. Later asked for (20 October 2026, step 2 of section 10 of the build plan): how to run the checkpoint report. Later asked for (20 October 2026, step 4 of section 10 of the build plan): the date the checkpoint report was run. Later asked for (21 October 2026, decision 19 of the build plan): the report on the rerun of part 1. Later asked for (24 October 2026, Requirement 4.24): the running time measured in the Nuvolos workspace, from Yu's run of the whole project on a fresh clone. -->
 
 ## What this project does
 
@@ -50,7 +50,8 @@ Other ways to run it:
 
 ## Time and output
 
-- Running time: TODO, measure in the Nuvolos workspace.
+- Running time: about 2 hours 40 minutes for `python code/run_all.py` (stages 2 to 7) in the Nuvolos workspace with one worker. A fresh clone of commit `385448f`, run as this README says, took 159.7 minutes in all, as printed by `run_all.py`: 26.2 for stage 3, 78.0 for stage 5, 55.1 for stage 6, and under a minute for each of stages 2, 4 and 7. Every file it wrote was the same as the committed one, apart from the columns that record seconds. Stage 1, which runs only with `--download`, is not included.
+- Keep the Nuvolos tab in front during a long run. In the course workspace, Nuvolos can stop a session whose browser tab has not been in front for an hour, even while code is running ([Nuvolos documentation](https://docs.nuvolos.com/reference/applications/long-running-applications.md)). A first attempt at the measurement above stopped that way during stage 5. Bringing the tab to the front for a minute about every 45 minutes keeps the session running.
 - Resources beyond the Nuvolos workspace: none. Stage 1 downloads 207 MB from CEPII and needs about 1.5 GB of free disk space; the other stages start from the committed extract.
 - Output: the result tables in `results/` (listed in [`results/README.md`](results/README.md)) and the figures and tables of the paper in `figures/` (listed in [`figures/README.md`](figures/README.md)).
 
