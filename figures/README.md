@@ -1,13 +1,15 @@
 # Figures
 
-<!-- Drafted with Claude (Anthropic). Asked for: a note stating the rule for this folder. Later asked for (18 October 2026, section 5 of docs/build_plan.md): the files stage 7 will write. Later asked for (21 October 2026, decision 19 of the build plan): the checkpoint report on the rerun of part 1. Later asked for (21 October 2026, decision 20 of the build plan): the ridge line in the learning curves. Later asked for (23 October 2026, stage 7 of the build plan): one line per file that stage 7 writes. -->
+<!-- Drafted with Claude (Anthropic). Asked for: a note stating the rule for this folder. Later asked for (18 October 2026, section 5 of docs/build_plan.md): the files stage 7 will write. Later asked for (21 October 2026, decision 19 of the build plan): the checkpoint report on the rerun of part 1. Later asked for (21 October 2026, decision 20 of the build plan): the ridge line in the learning curves. Later asked for (23 October 2026, stage 7 of the build plan): one line per file that stage 7 writes. Later asked for (24 October 2026, decision 23 of the build plan): the tables of the models and of the variables. -->
 
 Every file in this folder is written by `code/07_figures.ipynb` (Requirement 4.11). Nothing is added by hand. Figures are saved as `.pdf`, tables as `.csv` and `.tex` (decision 7 of `docs/build_plan.md`).
 
-`07_figures.ipynb` writes every file below from the files of stages 2 to 6 in `results/` and from `data/gravity_clean.csv`, after checking that those files agree with each other (section 6 of the build plan, stage 7). Each table is a `.csv` with the full numbers and a `.tex` with the same rows rounded for the paper: a LaTeX `tabular` with the rules of the `booktabs` package, to be put in a table with its caption. Each figure is a `.pdf`, with a `.csv` of the numbers it draws. Captions are Yu's and go in the paper.
+`07_figures.ipynb` writes every file below from the files of stages 2 to 6 in `results/`, from `data/gravity_extract.csv` and `data/gravity_clean.csv`, and, for `tab_models`, from the settings in `code/helpers.py`, after checking that those files agree with each other (section 6 of the build plan, stage 7). Each table is a `.csv` with the full numbers and a `.tex` with the same rows rounded for the paper: a LaTeX `tabular` with the rules of the `booktabs` package, to be put in a table with its caption. Each figure is a `.pdf`, with a `.csv` of the numbers it draws. Captions are Yu's and go in the paper.
 
 | File | What it shows |
 |---|---|
+| `tab_models` | The settings of `ppml`, `rf` and `gbm`: the scikit-learn estimator, the settings tuned with the values tried, and the fixed settings, read from `code/helpers.py` |
+| `tab_variables` | The columns of the CEPII extract, the unit of each and what stage 2 does with it, checked on `data/gravity_extract.csv` and `data/gravity_clean.csv` |
 | `tab_cleaning` | The rows of each year in the extract and after each cleaning step |
 | `tab_summary` | Summary statistics of the target and the eight predictors in the cleaned table, per year |
 | `tab_tuned` | The tuned settings of the development year and the test errors by training size, with the model the size rule picks and the settings at an edge of their grid (`results/size_rule.csv`) |
