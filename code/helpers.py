@@ -42,7 +42,13 @@
 # with twice the trees, the number of draws in which more trees lowered the
 # error. Later asked for (24 October 2026, decision 23 of docs/build_plan.md):
 # the tables of the models and of the variables, written from the code and
-# checked on the files, so that no table of the paper is typed by hand.
+# checked on the files, so that no table of the paper is typed by hand. Later
+# asked for (4 November 2026, decisions 24 and 25 of docs/build_plan.md,
+# "Rerun with zeros" and "Drop the pairs"): the Poisson deviance of a row whose
+# flow is zero; the rows that an indicator separates left out of each fit of
+# ppml and of the ridge line, with the two columns that record them and a check
+# of the rule on a toy sample; the countries of a set of rows; and the tables of
+# the cleaning and of the variables with the zero flows.
 """Code used by more than one notebook (Requirement 4.9).
 
 Every notebook imports this module in its first code cell, before pandas,
@@ -257,24 +263,28 @@ def model_configurations():
 CONFIGURATIONS = model_configurations()
 # The three groups of test rows whose deviance stage 3 records separately.
 GROUP_NAMES = ("top1", "next9", "rest")
-# The columns of dev_runs.csv, in order (stage 3 step 5). lbfgs_fallback,
-# train_total_ratio and the coef_ and ones_ columns are filled on the ppml rows
-# only (decision 14). ridge_alpha, the penalty that cross-validation chose on
-# the draw, is filled on the ridge rows only; it comes last, so the columns
-# before it are in the same places as in the files of part 1.
+# The columns of dev_runs.csv, in order (stage 3 step 5). constant_columns,
+# separated_columns and separated_rows describe the training sample of the
+# draw as the ppml fit saw it, and are filled on every row; decision 25 added
+# the last two, after constant_columns. lbfgs_fallback, train_total_ratio and
+# the coef_ and ones_ columns are filled on the ppml rows only (decision 14).
+# ridge_alpha, the penalty that cross-validation chose on the draw, is filled
+# on the ridge rows only.
 RUN_COLUMNS = (
     ["variant", "year", "split", "size", "draw", "model", "config",
      "rf_features", "rf_min_leaf", "gbm_depth", "gbm_trees",
      "test_deviance", "d2", "mae_rel", "rmse_rel", "train_deviance"]
     + [f"deviance_{name}" for name in GROUP_NAMES]
-    + ["max_pred_ratio", "seconds", "constant_columns", "lbfgs_fallback", "train_total_ratio", "coef_intercept"]
+    + ["max_pred_ratio", "seconds", "constant_columns", "separated_columns", "separated_rows", "lbfgs_fallback",
+       "train_total_ratio", "coef_intercept"]
     + [f"coef_{name}" for name in PREDICTORS]
     + [f"ones_{name}" for name in INDICATORS]
     + ["ridge_alpha"]
 )
 # Columns that hold whole numbers but are empty on some rows. pandas would
 # write them as 8.0; the type Int64 writes 8, and an empty field where missing.
-WHOLE_NUMBER_COLUMNS = (["rf_features", "rf_min_leaf", "gbm_depth", "gbm_trees", "constant_columns", "lbfgs_fallback"]
+WHOLE_NUMBER_COLUMNS = (["rf_features", "rf_min_leaf", "gbm_depth", "gbm_trees", "constant_columns",
+                         "separated_columns", "separated_rows", "lbfgs_fallback"]
                         + [f"ones_{name}" for name in INDICATORS])
 
 
@@ -295,6 +305,16 @@ def split_pairs(table, year, split_id):
     test = rows[in_test].reset_index(drop=True)
     assert not set(pool["pair_id"]) & set(test["pair_id"]), "A pair_id is on both sides of the split."
     return pool, test
+
+
+def countries(rows):
+    """The country identifiers in rows, as origin or as destination.
+
+    Stages 3 and 5 print how many countries of the test set are also in the
+    training pool: the split is by pair, not by country, so a model can see a
+    country of a test pair in its other pairs (decision 24).
+    """
+    return set(rows["country_id_o"]) | set(rows["country_id_d"])
 
 
 def test_groups(y_test):
@@ -318,10 +338,15 @@ def test_groups(y_test):
 def unit_deviance(y, predicted):
     """The Poisson deviance of each row, d(y, m) = 2 * (y * ln(y / m) - y + m) (section 1).
 
-    Every recorded flow is positive, so y * ln(y / m) needs no special case for
-    y = 0. Its mean equals sklearn's mean_poisson_deviance.
+    Where the flow is 0, y * ln(y / m) is taken as 0, its limit as y goes to 0,
+    so d(0, m) = 2 * m (decision 24). Its mean equals scikit-learn's
+    mean_poisson_deviance, which computes it the same way.
     """
-    return 2 * (y * np.log(y / predicted) - y + predicted)
+    # A 1 stands in for a zero flow only so that no log of 0 is taken; where
+    # the flow is 0, the second numpy.where puts 0 in place of that term.
+    safe_y = np.where(y > 0, y, 1.0)
+    y_log_ratio = np.where(y > 0, y * np.log(safe_y / predicted), 0.0)
+    return 2 * (y_log_ratio - y + predicted)
 
 
 def draw_sample(pool_rows, year, split_id, n, draw):
@@ -379,24 +404,100 @@ def make_tree(seed):
     return DecisionTreeRegressor(criterion="poisson", random_state=seed)
 
 
+def separated_rows(X_train, y_train):
+    """The indicators that separate a training sample, and the rows on their separated side (decision 25).
+
+    An indicator separates the sample when every row on one side of it, all
+    its 1s or all its 0s, has a zero flow. The best ppml fit then pushes its
+    coefficient without limit, so no estimate exists (Santos Silva and
+    Tenreyro 2010, Economics Letters 107(2)). Each indicator that is not
+    constant in the sample is checked on both sides. Returns the names of the
+    indicators that separate the sample, and a mask that is True on the rows
+    on their separated side, which the fits of ppml and ridge leave out, as
+    the command ppmlhdfe does (Correia, Guimaraes and Zylkin 2020, Stata
+    Journal 20(1)). One check is enough: the rows left out all have a zero
+    flow, so leaving them out cannot make another indicator separate the
+    rows that are left. A combination of indicators that separates the sample
+    is not checked; it would show as an extreme coefficient (decision 14).
+    """
+    zero = y_train == 0
+    left_out = np.zeros(len(y_train), dtype=bool)
+    separating = []
+    for name in INDICATORS:
+        values = X_train[:, PREDICTORS.index(name)]
+        if values.min() == values.max():
+            continue
+        for side in (1, 0):
+            on_side = values == side
+            if zero[on_side].all():
+                separating.append(name)
+                left_out = left_out | on_side
+    return separating, left_out
+
+
+def check_separation_rule():
+    """Section 8: the rule of decision 25 on a toy sample of six rows, two of them with a zero flow.
+
+    An indicator whose 1s all have a zero flow separates the sample and its
+    rows with a 1 are left out; one of whose 1s has a positive flow leaves
+    none out; one whose 0s all have a zero flow is treated as the first. In
+    every case comlang_off, whose 1s and 0s both include a positive flow,
+    separates nothing, and the indicators that are 0 on every row, being
+    constant, are not checked.
+    """
+    y = np.array([0.0, 0.0, 5.0, 3.0, 2.0, 7.0])
+    X = np.zeros((len(y), len(PREDICTORS)))
+    X[:, PREDICTORS.index("ln_gdp_o")] = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]
+    X[:, PREDICTORS.index("ln_gdp_d")] = [6.0, 5.0, 4.0, 3.0, 2.0, 1.0]
+    X[:, PREDICTORS.index("ln_dist")] = [8.0, 9.0, 8.5, 7.5, 9.5, 7.0]
+    X[:, PREDICTORS.index("comlang_off")] = [1, 0, 1, 0, 1, 0]
+    contig = PREDICTORS.index("contig")
+    first_two = [True, True, False, False, False, False]
+    cases = [
+        ("the 1s of contig all have a zero flow", [1, 1, 0, 0, 0, 0], ["contig"], first_two),
+        ("one of the 1s of contig has a positive flow", [1, 1, 1, 0, 0, 0], [], [False] * 6),
+        ("the 0s of contig all have a zero flow", [0, 0, 1, 1, 1, 1], ["contig"], first_two),
+    ]
+    for case, values, expected_separating, expected_left_out in cases:
+        X[:, contig] = values
+        separating, left_out = separated_rows(X, y)
+        assert separating == expected_separating and left_out.tolist() == expected_left_out, \
+            f"Toy check of decision 25, when {case}: {separating} and {left_out.tolist()}. Stop and report."
+    print("The rule of decision 25 passes its check on a toy sample: it leaves out the rows of an indicator whose "
+          "1s, or whose 0s, all have a zero flow, and none when one of those flows is positive.")
+
+
 def fit_ppml(X_train, y_train, X_test):
     """Fit ppml on one training sample.
 
     An indicator that is constant in the sample is dropped from this one fit
     (its coefficient is in effect zero), because PoissonRegressor(alpha=0)
-    needs a design matrix of full rank (stage 3). If the other columns are
-    collinear, scikit-learn warns and falls back from Newton-Cholesky to
-    L-BFGS: that is recorded, not repaired. What is recorded is whether
-    scikit-learn warned that it fell back, as the plan words it.
+    needs a design matrix of full rank (stage 3). With the zero flows, an
+    indicator can also separate the sample (separated_rows): the rows on its
+    separated side are left out of this one fit, and the indicator, then
+    constant on the rows used, is dropped with the others (decision 25). If
+    the columns kept are collinear, scikit-learn warns and falls back from
+    Newton-Cholesky to L-BFGS: that is recorded, not repaired. What is
+    recorded is whether scikit-learn warned that it fell back, as the plan
+    words it. The training predictions cover every row of the sample, the
+    rows left out included; the predicted training total is compared with the
+    observed one over the rows the fit used.
     """
     indicator_columns = [PREDICTORS.index(name) for name in INDICATORS]
     constant = [j for j in indicator_columns if X_train[:, j].min() == X_train[:, j].max()]
-    kept = [j for j in range(len(PREDICTORS)) if j not in constant]
+    separating, left_out = separated_rows(X_train, y_train)
+    used = ~left_out
+    X_used, y_used = X_train[used], y_train[used]
+    # Dropped: every indicator constant on the rows used, which are those
+    # constant in the sample and those that separate it. With no separation,
+    # the rows used are the sample and the fit is the one of the first run.
+    dropped = [j for j in indicator_columns if X_used[:, j].min() == X_used[:, j].max()]
+    kept = [j for j in range(len(PREDICTORS)) if j not in dropped]
     model = make_ppml()
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
         start = time.perf_counter()
-        model.fit(X_train[:, kept], y_train)
+        model.fit(X_used[:, kept], y_used)
         seconds = time.perf_counter() - start
     fell_back = False
     for warning in caught:
@@ -416,36 +517,45 @@ def fit_ppml(X_train, y_train, X_test):
         "coefficients": coefficients,
         "ones": {name: int(X_train[:, PREDICTORS.index(name)].sum()) for name in INDICATORS},
         "constant_columns": len(constant),
+        "separated_columns": len(separating),
+        "separated_rows": int(left_out.sum()),
         "fell_back": fell_back,
         "seconds": seconds,
-        # Section 8: unpenalised PPML predicts the observed training total, unless the fit fell back.
-        "total_ratio": train_predicted.sum() / y_train.sum(),
+        # Section 8: unpenalised PPML predicts the observed total of the rows it was fitted on,
+        # unless the fit fell back.
+        "total_ratio": train_predicted[used].sum() / y_used.sum(),
     }
 
 
 def fit_ridge_once(alpha, X_fit, y_fit, X_other):
     """One fit of the ridge line on the rows X_fit, y_fit (section 6, Ridge line).
 
-    Each predictor is standardised with its mean and standard deviation over
-    the rows of this fit (ddof 0, as StandardScaler computes it), so that the
-    penalty weighs every coefficient on the same scale. A column with one
-    value on those rows cannot be standardised and is dropped from this fit,
-    as ppml drops a constant indicator. The flow is divided by its mean over
-    the same rows, so that alpha means the same at every size and in both
-    years (decision 18), and the predictions are multiplied back into thousand
-    USD. Returns the predictions for the rows X_other and for the fit rows,
-    and the seconds of the fit call.
+    The rows that an indicator separates (separated_rows) are left out of the
+    fit, as ppml leaves them out (decision 25), so that the ridge line still
+    differs from ppml only by its penalty. Each predictor is standardised with
+    its mean and standard deviation over the rows the fit uses (ddof 0, as
+    StandardScaler computes it), so that the penalty weighs every coefficient
+    on the same scale. A column with one value on those rows cannot be
+    standardised and is dropped from this fit, as ppml drops a constant
+    indicator. The flow is divided by its mean over the same rows, so that
+    alpha means the same at every size and in both years (decision 18), and
+    the predictions are multiplied back into thousand USD. Returns the
+    predictions for the rows X_other and for every row of X_fit, and the
+    seconds of the fit call.
     """
-    kept = [j for j in range(X_fit.shape[1]) if X_fit[:, j].min() != X_fit[:, j].max()]
-    centre = X_fit[:, kept].mean(axis=0)
-    spread = X_fit[:, kept].std(axis=0)
-    # The other rows are standardised with the fit rows' mean and spread, as the fit saw them.
+    _, left_out = separated_rows(X_fit, y_fit)
+    X_used, y_used = X_fit[~left_out], y_fit[~left_out]
+    kept = [j for j in range(X_used.shape[1]) if X_used[:, j].min() != X_used[:, j].max()]
+    centre = X_used[:, kept].mean(axis=0)
+    spread = X_used[:, kept].std(axis=0)
+    # Every row is standardised with the mean and spread of the rows used, as the fit saw them.
+    Z_used = (X_used[:, kept] - centre) / spread
     Z_fit = (X_fit[:, kept] - centre) / spread
     Z_other = (X_other[:, kept] - centre) / spread
-    level = y_fit.mean()
+    level = y_used.mean()
     model = make_ridge(alpha)
     start = time.perf_counter()
-    model.fit(Z_fit, y_fit / level)
+    model.fit(Z_used, y_used / level)
     seconds = time.perf_counter() - start
     return {
         "other_predicted": level * model.predict(Z_other),
@@ -520,7 +630,9 @@ def run_draw(X_pool, y_pool, pair_pool, X_test, y_test, year, split_id, n, draw,
     defines them: predicting the test rows and scoring are not timed, but the
     fit of a forest includes the out-of-bag predictions that oob_score=True
     makes scikit-learn compute, and the ridge line sums its 31 fits); and what
-    stage 3 records about the sample, the ppml fit and the ridge line.
+    stage 3 records about the sample, the ppml fit and the ridge line, among
+    them the indicators that separated the sample and the rows ppml left out
+    for that reason (decision 25).
 
     With noise=True (the check noise of stage 6), the training flows of the
     sample are multiplied by noise_factor before any model sees them: the same
@@ -600,6 +712,8 @@ def run_draw(X_pool, y_pool, pair_pool, X_test, y_test, year, split_id, n, draw,
         "seconds": np.array([seconds[config] for config in order]),
         "largest_train_flow": y_train.max(),
         "constant_columns": ppml["constant_columns"],
+        "separated_columns": ppml["separated_columns"],
+        "separated_rows": ppml["separated_rows"],
         "ppml": ppml,
         "ridge": ridge,
     }
@@ -673,6 +787,8 @@ def draw_rows(result, y_test, groups, keys):
         row["max_pred_ratio"] = predicted.max() / result["largest_train_flow"]
         row["seconds"] = result["seconds"][i]
         row["constant_columns"] = result["constant_columns"]
+        row["separated_columns"] = result["separated_columns"]
+        row["separated_rows"] = result["separated_rows"]
         if configuration["model"] == "ppml":
             ppml = result["ppml"]
             row["lbfgs_fallback"] = int(ppml["fell_back"])
@@ -770,8 +886,10 @@ def run_experiment(X_pool, y_pool, pair_pool, X_test, y_test, variant, year, spl
     and remainder, one row per configuration (component_rows).
 
     After each size it prints the checks of section 8 on ppml: the fits that
-    fell back to L-BFGS, the draws with a constant indicator, and the largest
-    relative difference between the predicted and the observed training total.
+    fell back to L-BFGS, the draws with a constant indicator, the draws with
+    an indicator that separates the sample and the rows left out for that
+    reason in all (decision 25), and the largest relative difference between
+    the predicted and the observed training total, over the rows the fit used.
     With report_ridge, it also prints, for each penalty of the grid, in how
     many draws the ridge line chose it (stage 3; stage 6 reports nothing on
     the ridge line, decision 18). Returns the two tables, with the columns of
@@ -801,6 +919,8 @@ def run_experiment(X_pool, y_pool, pair_pool, X_test, y_test, variant, year, spl
         print(f"n = {n:>5,}: {draws} draws in {(time.perf_counter() - start) / 60:.1f} minutes. "
               f"ppml: {int(ppml['lbfgs_fallback'].sum())} fit(s) fell back to L-BFGS, "
               f"{int((ppml['constant_columns'] > 0).sum())} draw(s) with a constant indicator, "
+              f"{int((ppml['separated_columns'] > 0).sum())} draw(s) with a separating indicator "
+              f"({int(ppml['separated_rows'].sum())} row(s) left out in all), "
               f"largest relative difference of the training total {(ppml['train_total_ratio'] - 1).abs().max():.1e}")
         if FIT_RIDGE and report_ridge:
             chosen = size_runs.loc[size_runs["config"] == "ridge", "ridge_alpha"]
@@ -1389,7 +1509,8 @@ def gbm_extremes(runs):
     the same sample (the threshold is 10), the largest test prediction divided
     by the largest training flow (the threshold is 1,000), and the number of
     gbm rows (one configuration on one draw) that divergences flags. Stage 4
-    step 0 reads it on the sizes above CHECKPOINT_MAX.
+    step 0 reads it on every size (decision 24); the first run read it on the
+    sizes above CHECKPOINT_MAX, those that part 1 had not shown at the checkpoint.
     """
     mean_draws = runs[runs["config"] == "mean"][["size", "draw", "test_deviance"]]
     gbm = runs[runs["model"] == "gbm"].merge(mean_draws, on=["size", "draw"], suffixes=("", "_mean"))
@@ -1606,15 +1727,17 @@ def cutoff_table(crossing_table, resampled):
 
 # The methods of stage 5, in the order of their rows on each draw (stage 5 steps 1 to 5).
 METHODS = ("ppml", "rf", "gbm", "size_rule", "best_of_three", "cv_select", "ridge")
-# The columns of analysis_runs.csv, in order. constant_columns, lbfgs_fallback
-# and train_total_ratio are filled on the ppml rows only, ridge_alpha on the
-# ridge rows only.
+# The columns of analysis_runs.csv, in order. constant_columns,
+# separated_columns and separated_rows (decision 25), lbfgs_fallback and
+# train_total_ratio are filled on the ppml rows only, ridge_alpha on the ridge
+# rows only.
 ANALYSIS_RUN_COLUMNS = ["year", "split", "size", "draw", "method", "model", "config",
                         "rf_features", "rf_min_leaf", "gbm_depth", "gbm_trees",
                         "test_deviance", "d2", "mae_rel", "rmse_rel", "seconds", "fits",
-                        "constant_columns", "lbfgs_fallback", "train_total_ratio", "ridge_alpha"]
+                        "constant_columns", "separated_columns", "separated_rows", "lbfgs_fallback",
+                        "train_total_ratio", "ridge_alpha"]
 ANALYSIS_WHOLE_NUMBER_COLUMNS = ["rf_features", "rf_min_leaf", "gbm_depth", "gbm_trees", "fits",
-                                 "constant_columns", "lbfgs_fallback"]
+                                 "constant_columns", "separated_columns", "separated_rows", "lbfgs_fallback"]
 # The columns of analysis_summary.csv, in order. The columns after fits are
 # filled on one method's rows only: best and the win counts on ppml, the
 # differences to cv_select (the test of H2) and to best_of_three on size_rule,
@@ -1870,6 +1993,8 @@ def analysis_rows(result, y_test, settings, keys):
     # What stage 3 records about the ppml fit (section 8), on the ppml row only.
     ppml = result["fitted"]["ppml"]["ppml"]
     rows["ppml"]["constant_columns"] = ppml["constant_columns"]
+    rows["ppml"]["separated_columns"] = ppml["separated_columns"]
+    rows["ppml"]["separated_rows"] = ppml["separated_rows"]
     rows["ppml"]["lbfgs_fallback"] = int(ppml["fell_back"])
     rows["ppml"]["train_total_ratio"] = ppml["total_ratio"]
     return [rows[method] for method in METHODS if method in rows]
@@ -2351,7 +2476,7 @@ def with_se(value, se):
 
 
 def flow_text(value):
-    """A trade flow in thousand USD: a whole number, or three significant digits below 1 (a flow is never zero)."""
+    """A trade flow in thousand USD: a whole number, or three significant digits below 1; a zero flow is written 0."""
     return thousands(value) if abs(value) >= 1 else f"{value:.3g}"
 
 
@@ -2481,8 +2606,10 @@ VARIABLES_USED = [
     ("Country identifiers", ["country_id_o", "country_id_d"], "Text", "key", ["country_id_o", "country_id_d"]),
     ("ISO3 country codes", ["iso3_o", "iso3_d"], "Text", "unused", []),
 ]
-TREATMENTS = {"target": "Target, in levels", "log": "Natural log", "as_is": "As is", "filter": "Filter only",
-              "key": "Key of the row", "unused": "Not used"}
+# The treatment of the target names the rule of decision 24, which stage 2 step 3 applies.
+TREATMENTS = {"target": "Target, in levels; a missing flow is 0 if both countries have a recorded flow that year",
+              "log": "Natural log", "as_is": "As is", "filter": "Filter only", "key": "Key of the row",
+              "unused": "Not used"}
 
 
 def variables_table(extract, clean):
@@ -2493,9 +2620,11 @@ def variables_table(extract, clean):
     gravity_clean.csv (with pair_id, which stage 2 builds from the country
     identifiers), the predictors being PREDICTORS and the target TARGET.
     Every row of gravity_clean.csv is one row of the extract, and on those rows
-    a column kept "as is" or as the target has the extract's values, a
-    "natural log" column is the log of the extract's column, a filter column
-    is 1, and a column whose unit is "0 or 1" holds only 0 and 1.
+    a column kept "as is" has the extract's values, the target has them where
+    the extract records a flow and is 0 exactly where it records none
+    (decision 24), a "natural log" column is the log of the extract's column,
+    a filter column is 1, and a column whose unit is "0 or 1" holds only 0
+    and 1.
     """
     key = ["year", "country_id_o", "country_id_d"]
     listed, becomes, predictors, target = [], [], [], []
@@ -2523,7 +2652,16 @@ def variables_table(extract, clean):
             values = both[f"{column}_extract" if column in clean.columns and column not in key else column]
             if unit == "0 or 1":
                 assert values.isin([0, 1]).all(), f"{column} is not 0 or 1 on every row kept. Stop and report."
-            if treatment in ("target", "as_is"):
+            if treatment == "target":
+                # Decision 24: the recorded flows are kept, and a flow the extract does not record is 0.
+                recorded = values.notna().to_numpy()
+                flows = both[cleaned[position]].to_numpy()
+                assert np.allclose(flows[recorded], values.to_numpy()[recorded], rtol=1e-12, atol=0), \
+                    f"{cleaned[position]} in gravity_clean.csv is not {column} of the extract. Stop and report."
+                assert ((flows == 0) == ~recorded).all(), \
+                    f"{cleaned[position]} in gravity_clean.csv is not 0 exactly where the extract has no flow. " \
+                    "Stop and report."
+            if treatment == "as_is":
                 assert np.allclose(both[cleaned[position]], values, rtol=1e-12, atol=0), \
                     f"{cleaned[position]} in gravity_clean.csv is not {column} of the extract. Stop and report."
             if treatment == "log":
@@ -2544,41 +2682,57 @@ def variables_text(table):
 
 
 def cleaning_table(log, clean):
-    """tab_cleaning: the rows of each year in the extract and after each step of stage 2 (cleaning_log.csv).
+    """tab_cleaning: the rows of each year in the extract and after each line of stage 2's log (cleaning_log.csv).
 
-    The first row is the extract. The rows left after the last step must be
-    the rows of that year in gravity_clean.csv.
+    The first row is the extract. Then one row per line of the log, in the
+    order stage 2 wrote them: what the step did (action: the rows dropped or,
+    at step 3, set to zero; decision 24), why, the rows it dropped or set to
+    zero and the rows left, for each year. In each year a line must start
+    from the rows the line before it left, and the rows left after the last
+    line must be the rows of that year in gravity_clean.csv.
     """
     years = sorted(int(year) for year in log["year"].unique())
-    first_step = log["step"].min()
-    extract = {"step": 0, "dropped_because": "(rows in the extract)"}
+    extract = {"step": 0, "action": "", "because": "In the extract"}
     for year in years:
         of_year = log[log["year"] == year]
-        extract[f"rows_dropped_{year}"] = pd.NA
-        extract[f"rows_left_{year}"] = of_year.loc[of_year["step"] == first_step, "rows_before"].item()
+        before, left = of_year["rows_before"].tolist(), of_year["rows_left"].tolist()
+        assert before[1:] == left[:-1], \
+            f"In {year}, a line of cleaning_log.csv does not start from the rows the line before it left."
+        extract[f"rows_affected_{year}"] = pd.NA
+        # The log lists the steps in order, so its first line of the year starts from the extract.
+        extract[f"rows_left_{year}"] = before[0]
     rows = [extract]
-    for step, of_step in log.groupby("step", sort=True):
-        assert of_step["dropped_because"].nunique() == 1, f"Step {step} has two reasons in cleaning_log.csv."
-        row = {"step": step, "dropped_because": of_step["dropped_because"].iloc[0]}
+    # The lines of a step and action share their reason in both years; sort=False keeps the order of the log.
+    for (step, action), of_line in log.groupby(["step", "action"], sort=False):
+        assert of_line["because"].nunique() == 1, f"Step {step} ({action}) has two reasons in cleaning_log.csv."
+        row = {"step": step, "action": action, "because": of_line["because"].iloc[0]}
         for year in years:
-            in_year = of_step[of_step["year"] == year]
-            row[f"rows_dropped_{year}"] = in_year["rows_dropped"].item()
+            in_year = of_line[of_line["year"] == year]
+            row[f"rows_affected_{year}"] = in_year["rows_affected"].item()
             row[f"rows_left_{year}"] = in_year["rows_left"].item()
         rows.append(row)
     table = pd.DataFrame(rows)
     for year in years:
         assert table[f"rows_left_{year}"].iloc[-1] == (clean["year"] == year).sum(), \
             f"cleaning_log.csv and gravity_clean.csv do not have the same rows in {year}."
-        table[f"rows_dropped_{year}"] = table[f"rows_dropped_{year}"].astype("Int64")
+        table[f"rows_affected_{year}"] = table[f"rows_affected_{year}"].astype("Int64")
     return table
 
 
 def cleaning_text(table):
-    """tab_cleaning as text: a pair of columns, rows dropped and rows left, for each year."""
+    """tab_cleaning as text: what each line of the log did and why, and for each year its rows and the rows left."""
     years = [column.removeprefix("rows_left_") for column in table.columns if column.startswith("rows_left_")]
-    text = pd.DataFrame({"Step": table["step"].astype(str), "Rows dropped because": table["dropped_because"]})
+    lines = []
+    for row in table.itertuples():
+        if row.action == "dropped":
+            lines.append(f"Dropped: {row.because}")
+        elif row.action == "set to zero":
+            lines.append(f"Set to 0: {row.because}")
+        else:
+            lines.append(row.because)
+    text = pd.DataFrame({"Step": table["step"].astype(str), "Rows dropped or set to 0, and why": lines})
     for year in years:
-        text[f"{year}: dropped"] = table[f"rows_dropped_{year}"].map(thousands)
+        text[f"{year}: rows"] = table[f"rows_affected_{year}"].map(thousands)
         text[f"{year}: left"] = table[f"rows_left_{year}"].map(thousands)
     return text, "ll" + "rr" * len(years)
 
