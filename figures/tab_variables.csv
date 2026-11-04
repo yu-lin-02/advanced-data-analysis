@@ -1,5 +1,5 @@
 variable,columns,unit,treatment,cleaned_columns
-Trade flow from i to j,tradeflow_baci,Thousand current USD,"Target, in levels",tradeflow_baci
+Trade flow from i to j,tradeflow_baci,Thousand current USD,"Target, in levels; a missing flow is 0 if both countries have a recorded flow that year",tradeflow_baci
 GDP of origin and destination,"gdp_o, gdp_d",Thousand current USD,Natural log,"ln_gdp_o, ln_gdp_d"
 Distance,distw_harmonic,Kilometres,Natural log,ln_dist
 Contiguous,contig,0 or 1,As is,contig

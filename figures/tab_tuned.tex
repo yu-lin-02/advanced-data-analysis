@@ -2,26 +2,26 @@
 \toprule
 Size & Model & Setting & Mean test deviance & SE & One draw over half & Median & Size rule picks & Edge of the grid \\
 \midrule
-50 & ppml &  & 27,514,282,425 & 27,507,471,087 & yes & 1,426,944 &  &  \\
-50 & rf & 3 of 8 predictors, leaf 1 & 1,906,763 & 74,979 &  & 1,777,024 & yes & leaf: smallest possible \\
-50 & gbm & depth 1, 50 trees & 2,195,727 & 158,862 &  & 1,925,539 &  &  \\
-100 & ppml &  & 2,059,339 & 718,514 &  & 989,306 &  &  \\
-100 & rf & 3 of 8 predictors, leaf 1 & 1,507,756 & 43,992 &  & 1,471,728 &  & leaf: smallest possible \\
-100 & gbm & depth 2, 50 trees & 1,405,070 & 39,033 &  & 1,355,991 & yes &  \\
-200 & ppml &  & 1,128,446 & 207,321 &  & 765,057 &  &  \\
-200 & rf & 8 of 8 predictors, leaf 1 & 1,176,149 & 75,976 &  & 1,011,287 &  & leaf: smallest possible \\
-200 & gbm & depth 3, 50 trees & 1,033,490 & 19,779 &  & 1,021,300 & yes &  \\
-500 & ppml &  & 666,159 & 31,934 &  & 588,844 & yes &  \\
-500 & rf & 8 of 8 predictors, leaf 1 & 804,882 & 28,563 &  & 753,092 &  & predictors: largest possible; leaf: smallest possible \\
-500 & gbm & depth 5, 50 trees & 776,247 & 15,212 &  & 759,914 &  &  \\
-1,000 & ppml &  & 561,776 & 14,674 &  & 531,744 & yes &  \\
-1,000 & rf & 8 of 8 predictors, leaf 1 & 762,878 & 70,460 &  & 622,642 &  &  \\
-1,000 & gbm & depth 1, 1,000 trees & 616,896 & 9,050 &  & 624,980 &  & depth: smallest possible \\
-2,000 & ppml &  & 510,569 & 7,348 &  & 495,545 &  &  \\
-2,000 & rf & 8 of 8 predictors, leaf 1 & 521,055 & 5,896 &  & 516,416 &  & predictors: largest possible; leaf: smallest possible \\
-2,000 & gbm & depth 1, 1,000 trees & 493,332 & 6,849 &  & 487,823 & yes & depth: smallest possible; trees: largest in the grid \\
-5,000 & ppml &  & 482,634 & 4,471 &  & 473,201 &  &  \\
-5,000 & rf & 8 of 8 predictors, leaf 1 & 463,909 & 7,090 &  & 451,507 &  & leaf: smallest possible \\
-5,000 & gbm & depth 1, 1,000 trees & 429,894 & 3,575 &  & 431,372 & yes & trees: largest in the grid \\
+50 & ppml &  & 12,026,578,679 & 7,761,940,960 &  & 1,619,848 &  &  \\
+50 & rf & 8 of 8 predictors, leaf 1 & 2,404,275 & 77,113 &  & 2,280,184 & yes & leaf: smallest possible \\
+50 & gbm & depth 1, 50 trees & 2,798,138 & 80,029 &  & 2,656,874 &  &  \\
+100 & ppml &  & 15,318,058 & 11,378,869 & yes & 1,269,376 &  &  \\
+100 & rf & 8 of 8 predictors, leaf 1 & 1,860,586 & 53,429 &  & 1,833,907 & yes & predictors: largest possible; leaf: smallest possible \\
+100 & gbm & depth 5, 50 trees & 2,028,893 & 51,906 &  & 1,930,205 &  &  \\
+200 & ppml &  & 2,202,225 & 1,065,486 &  & 652,619 &  &  \\
+200 & rf & 8 of 8 predictors, leaf 1 & 1,502,541 & 45,653 &  & 1,419,755 &  & predictors: largest possible; leaf: smallest possible \\
+200 & gbm & depth 1, 400 trees & 1,413,381 & 36,486 &  & 1,373,158 & yes & depth: smallest possible \\
+500 & ppml &  & 625,835 & 53,086 &  & 491,384 & yes &  \\
+500 & rf & 8 of 8 predictors, leaf 1 & 1,067,663 & 29,657 &  & 1,025,656 &  & predictors: largest possible; leaf: smallest possible \\
+500 & gbm & depth 1, 400 trees & 970,570 & 18,717 &  & 955,170 &  & depth: smallest possible \\
+1,000 & ppml &  & 436,314 & 20,159 &  & 393,753 & yes &  \\
+1,000 & rf & 8 of 8 predictors, leaf 1 & 845,650 & 24,322 &  & 811,222 &  & predictors: largest possible; leaf: smallest possible \\
+1,000 & gbm & depth 1, 750 trees & 742,369 & 21,098 &  & 736,882 &  & depth: smallest possible \\
+2,000 & ppml &  & 364,682 & 9,111 &  & 344,895 & yes &  \\
+2,000 & rf & 8 of 8 predictors, leaf 1 & 668,562 & 14,513 &  & 649,342 &  & predictors: largest possible; leaf: smallest possible \\
+2,000 & gbm & depth 1, 1,000 trees & 499,685 & 12,387 &  & 490,208 &  & depth: smallest possible \\
+5,000 & ppml &  & 320,053 & 2,117 &  & 318,156 & yes &  \\
+5,000 & rf & 8 of 8 predictors, leaf 1 & 529,730 & 8,632 &  & 514,523 &  & predictors: largest possible; leaf: smallest possible \\
+5,000 & gbm & depth 1, 1,000 trees & 364,468 & 6,153 &  & 361,105 &  & depth: smallest possible; trees: largest in the grid \\
 \bottomrule
 \end{tabular}

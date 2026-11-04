@@ -1,22 +1,22 @@
 size,model,config,setting,draws,mean,se,se_unreliable,median,chosen,edge_of_grid
-50,ppml,ppml,,50,27514282425.00825,27507471086.68198,True,1426943.5313607561,False,
-50,rf,rf_features3_leaf1,"3 of 8 predictors, leaf 1",50,1906762.6366444547,74978.8680294948,False,1777024.0628562777,True,leaf: smallest possible
-50,gbm,gbm_depth1_trees50,"depth 1, 50 trees",50,2195727.421130277,158862.0342164172,False,1925539.164317937,False,
-100,ppml,ppml,,50,2059339.2472451322,718514.2684597938,False,989306.2655891243,False,
-100,rf,rf_features3_leaf1,"3 of 8 predictors, leaf 1",50,1507756.4254101207,43992.31398458109,False,1471727.9174119844,False,leaf: smallest possible
-100,gbm,gbm_depth2_trees50,"depth 2, 50 trees",50,1405070.4743444175,39033.49646436377,False,1355990.8780852698,True,
-200,ppml,ppml,,50,1128446.3670426488,207320.849695831,False,765056.9392655784,False,
-200,rf,rf_features8_leaf1,"8 of 8 predictors, leaf 1",50,1176149.1626707355,75975.51692225234,False,1011287.4183514847,False,leaf: smallest possible
-200,gbm,gbm_depth3_trees50,"depth 3, 50 trees",50,1033489.5588011108,19778.70723790139,False,1021299.9022811174,True,
-500,ppml,ppml,,50,666158.7384533002,31934.118674919737,False,588844.2080981781,True,
-500,rf,rf_features8_leaf1,"8 of 8 predictors, leaf 1",50,804881.9934981499,28562.614402460677,False,753092.3935627791,False,predictors: largest possible; leaf: smallest possible
-500,gbm,gbm_depth5_trees50,"depth 5, 50 trees",50,776246.7100823951,15212.059534513613,False,759913.6004237575,False,
-1000,ppml,ppml,,50,561775.5463144687,14674.106989832608,False,531744.092216541,True,
-1000,rf,rf_features8_leaf1,"8 of 8 predictors, leaf 1",50,762877.7926934944,70460.32987501279,False,622641.8823038118,False,
-1000,gbm,gbm_depth1_trees1000,"depth 1, 1,000 trees",50,616896.3403452436,9050.489990767932,False,624979.7243429311,False,depth: smallest possible
-2000,ppml,ppml,,50,510568.7518964051,7347.51051720391,False,495545.08404870157,False,
-2000,rf,rf_features8_leaf1,"8 of 8 predictors, leaf 1",50,521055.15922458423,5896.425160693008,False,516416.31616266456,False,predictors: largest possible; leaf: smallest possible
-2000,gbm,gbm_depth1_trees1000,"depth 1, 1,000 trees",50,493332.21252728277,6849.224366476743,False,487822.6653301857,True,depth: smallest possible; trees: largest in the grid
-5000,ppml,ppml,,50,482634.4773282462,4470.869770162045,False,473200.6848320636,False,
-5000,rf,rf_features8_leaf1,"8 of 8 predictors, leaf 1",50,463909.4822520084,7090.060360577383,False,451507.2292493035,False,leaf: smallest possible
-5000,gbm,gbm_depth1_trees1000,"depth 1, 1,000 trees",50,429893.60538438096,3575.3888536241916,False,431371.78292838845,True,trees: largest in the grid
+50,ppml,ppml,,50,12026578678.983078,7761940960.249269,False,1619848.2592619641,False,
+50,rf,rf_features8_leaf1,"8 of 8 predictors, leaf 1",50,2404274.927807218,77112.95180940979,False,2280184.0234884033,True,leaf: smallest possible
+50,gbm,gbm_depth1_trees50,"depth 1, 50 trees",50,2798138.3695456837,80029.45174187802,False,2656873.6086163465,False,
+100,ppml,ppml,,50,15318057.641219988,11378869.207321282,True,1269376.2205172735,False,
+100,rf,rf_features8_leaf1,"8 of 8 predictors, leaf 1",50,1860586.4932428198,53428.74175421932,False,1833907.2992317907,True,predictors: largest possible; leaf: smallest possible
+100,gbm,gbm_depth5_trees50,"depth 5, 50 trees",50,2028893.3908985197,51905.86754592385,False,1930205.2607368515,False,
+200,ppml,ppml,,50,2202225.250099889,1065485.708952613,False,652619.3934394883,False,
+200,rf,rf_features8_leaf1,"8 of 8 predictors, leaf 1",50,1502540.6927067188,45653.0442958765,False,1419754.8170328499,False,predictors: largest possible; leaf: smallest possible
+200,gbm,gbm_depth1_trees400,"depth 1, 400 trees",50,1413381.2859323937,36486.24992799945,False,1373158.4596500196,True,depth: smallest possible
+500,ppml,ppml,,50,625835.0776930192,53085.677608383296,False,491383.63143298856,True,
+500,rf,rf_features8_leaf1,"8 of 8 predictors, leaf 1",50,1067663.169618895,29656.708207170497,False,1025656.0153146223,False,predictors: largest possible; leaf: smallest possible
+500,gbm,gbm_depth1_trees400,"depth 1, 400 trees",50,970569.707142559,18716.816717167432,False,955170.2835095696,False,depth: smallest possible
+1000,ppml,ppml,,50,436313.76870694524,20159.352616317075,False,393752.89127031434,True,
+1000,rf,rf_features8_leaf1,"8 of 8 predictors, leaf 1",50,845650.3627422048,24322.05484476292,False,811221.7111680519,False,predictors: largest possible; leaf: smallest possible
+1000,gbm,gbm_depth1_trees750,"depth 1, 750 trees",50,742368.8101797262,21097.80691257895,False,736882.4409375567,False,depth: smallest possible
+2000,ppml,ppml,,50,364682.3814680602,9111.370731944846,False,344895.36923882057,True,
+2000,rf,rf_features8_leaf1,"8 of 8 predictors, leaf 1",50,668562.340278685,14513.117487573832,False,649341.8741357963,False,predictors: largest possible; leaf: smallest possible
+2000,gbm,gbm_depth1_trees1000,"depth 1, 1,000 trees",50,499685.3195436733,12387.014909439646,False,490207.84453213494,False,depth: smallest possible
+5000,ppml,ppml,,50,320053.11449632177,2116.543538998172,False,318156.3419695705,True,
+5000,rf,rf_features8_leaf1,"8 of 8 predictors, leaf 1",50,529729.8391293733,8631.758517777274,False,514523.30399890785,False,predictors: largest possible; leaf: smallest possible
+5000,gbm,gbm_depth1_trees1000,"depth 1, 1,000 trees",50,364467.5220527598,6152.988015596062,False,361104.75514995866,False,depth: smallest possible; trees: largest in the grid

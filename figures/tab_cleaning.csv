@@ -1,7 +1,8 @@
-step,dropped_because,rows_dropped_2017,rows_left_2017,rows_dropped_2019,rows_left_2019
-0,(rows in the extract),,63504,,63504
-1,origin and destination are the same country,252,63252,252,63252
-2,either country does not exist in that year,8262,54990,8262,54990
-3,no trade flow is recorded,23106,31884,23870,31120
-4,the GDP of either country or the distance is missing,2368,29516,2551,28569
-5,any of the five indicators is missing,554,28962,462,28107
+step,action,because,rows_affected_2017,rows_left_2017,rows_affected_2019,rows_left_2019
+0,,In the extract,,63504,,63504
+1,dropped,origin and destination are the same country,252,63252,252,63252
+2,dropped,either country does not exist in that year,8262,54990,8262,54990
+3,set to zero,"no trade flow is recorded, and both countries have a recorded flow that year",18068,54990,18832,54990
+3,dropped,"no trade flow is recorded, and one of the countries has no recorded flow that year",5038,49952,5038,49952
+4,dropped,the GDP of either country or the distance is missing,8946,41006,9752,40200
+5,dropped,any of the five indicators is missing,1610,39396,1200,39000
