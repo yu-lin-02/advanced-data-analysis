@@ -48,7 +48,11 @@
 # flow is zero; the rows that an indicator separates left out of each fit of
 # ppml and of the ridge line, with the two columns that record them and a check
 # of the rule on a toy sample; the countries of a set of rows; and the tables of
-# the cleaning and of the variables with the zero flows.
+# the cleaning and of the variables with the zero flows. Later asked for (4
+# November 2026, decision 26 of docs/build_plan.md, after stage 3 with the zero
+# flows stopped on a leaf of the single tree that predicted 0): the single tree
+# and the forests fitted on the flows in whole cents, with a check that no leaf
+# of theirs predicts 0.
 """Code used by more than one notebook (Requirement 4.9).
 
 Every notebook imports this module in its first code cell, before pandas,
@@ -132,6 +136,9 @@ DRAWS = 4 if QUICK else 50
 RF_TREES = 20 if QUICK else 100
 RF_MAX_FEATURES = (1.0, 3)  # 1.0 means all eight predictors, 3 means three
 RF_MIN_LEAF = (1, 5, 20)
+# Decision 26: the single tree and the forests are fitted on the flows in whole
+# US cents. The flows are in thousands of dollars, so one is 100,000 cents.
+CENTS_PER_THOUSAND = 100_000
 # Decision 19: the checkpoint's rule Grid edges added depth 7 (in quick mode
 # too) and, in the full run, 750 and 1,000 trees with GBM_MAX_TREES 1,000. The
 # first run of part 1 had depths 1, 2, 3 and 5 and at most 500 trees.
@@ -404,6 +411,36 @@ def make_tree(seed):
     return DecisionTreeRegressor(criterion="poisson", random_state=seed)
 
 
+def in_cents(flows):
+    """The flows in whole US cents, on which the single tree and the forests are fitted (decision 26).
+
+    A leaf predicts the mean flow of its training rows, so a leaf whose rows all
+    have a zero flow predicts 0. scikit-learn's Poisson criterion forbids the
+    split that would make it, but it tests the sum of a child's flows against a
+    fixed tolerance of about 2.2e-15 (sklearn/tree/_criterion.pyx, class
+    Poisson). With flows in thousands of dollars the sums carry larger rounding
+    errors, so a child of only zero flows can pass. Whole numbers below 2**53
+    are added exactly, so in whole cents such a sum is exactly 0 and the rule
+    works. The CEPII flows are whole dollars, so nothing is rounded; the noisy
+    flows of the check noise (stage 6) move by at most half a cent.
+    """
+    cents = np.round(flows * CENTS_PER_THOUSAND)
+    assert (cents[flows > 0] > 0).all(), "A positive flow is 0 in whole cents. Stop and report."
+    return cents
+
+
+def check_leaves(trees, name):
+    """Stop if a leaf of one of the fitted trees predicts 0 (decision 26).
+
+    trees is a list of fitted DecisionTreeRegressor: [tree] for the single
+    tree, forest.estimators_ for a forest. A leaf is a node with no child, and
+    tree_.value holds the mean training flow of each node.
+    """
+    for tree in trees:
+        is_leaf = tree.tree_.children_left == -1
+        assert (tree.tree_.value.ravel()[is_leaf] > 0).all(), f"A leaf of {name} predicts 0. Stop and report."
+
+
 def separated_rows(X_train, y_train):
     """The indicators that separate a training sample, and the rows on their separated side (decision 25).
 
@@ -632,7 +669,10 @@ def run_draw(X_pool, y_pool, pair_pool, X_test, y_test, year, split_id, n, draw,
     makes scikit-learn compute, and the ridge line sums its 31 fits); and what
     stage 3 records about the sample, the ppml fit and the ridge line, among
     them the indicators that separated the sample and the rows ppml left out
-    for that reason (decision 25).
+    for that reason (decision 25). The forests and the single tree are fitted
+    on the flows in whole cents (decision 26, in_cents), their predictions are
+    divided by CENTS_PER_THOUSAND, and check_leaves stops the run if a leaf of
+    theirs predicts 0.
 
     With noise=True (the check noise of stage 6), the training flows of the
     sample are multiplied by noise_factor before any model sees them: the same
@@ -654,6 +694,10 @@ def run_draw(X_pool, y_pool, pair_pool, X_test, y_test, year, split_id, n, draw,
     test_predicted["ppml"] = ppml["test_predicted"]
     train_deviance["ppml"] = mean_poisson_deviance(y_train, ppml["train_predicted"])
 
+    # The forests and the single tree are fitted on the flows in whole cents, and
+    # their predictions are turned back into thousands of dollars (decision 26).
+    y_cents = in_cents(y_train)
+    where = f"year {year}, split {split_id}, n = {n}, draw {draw}"
     for max_features in RF_MAX_FEATURES:
         for min_leaf in RF_MIN_LEAF:
             config = f"rf_features{rf_features(max_features)}_leaf{min_leaf}"
@@ -662,12 +706,14 @@ def run_draw(X_pool, y_pool, pair_pool, X_test, y_test, year, split_id, n, draw,
                 # With few trees a training row can be in every tree's sample, so it has
                 # no out-of-bag prediction; such rows are left out of the training deviance below.
                 warnings.filterwarnings("ignore", message="Some inputs do not have OOB scores")
-                forest = make_rf(max_features, min_leaf, seed).fit(X_train, y_train)
+                forest = make_rf(max_features, min_leaf, seed).fit(X_train, y_cents)
             seconds[config] = time.perf_counter() - start
-            test_predicted[config] = forest.predict(X_test)
+            check_leaves(forest.estimators_, f"{config} at {where}")
+            test_predicted[config] = forest.predict(X_test) / CENTS_PER_THOUSAND
             # scikit-learn leaves the out-of-bag prediction at 0 for a row that no tree left out.
-            has_oob = forest.oob_prediction_ > 0
-            train_deviance[config] = mean_poisson_deviance(y_train[has_oob], forest.oob_prediction_[has_oob])
+            out_of_bag = forest.oob_prediction_ / CENTS_PER_THOUSAND
+            has_oob = out_of_bag > 0
+            train_deviance[config] = mean_poisson_deviance(y_train[has_oob], out_of_bag[has_oob])
 
     for depth in GBM_DEPTHS:
         start = time.perf_counter()
@@ -692,9 +738,10 @@ def run_draw(X_pool, y_pool, pair_pool, X_test, y_test, year, split_id, n, draw,
     train_deviance["mean"] = mean_poisson_deviance(y_train, np.full(len(y_train), mean_flow))
 
     start = time.perf_counter()
-    tree = make_tree(seed).fit(X_train, y_train)
+    tree = make_tree(seed).fit(X_train, y_cents)
     seconds["tree"] = time.perf_counter() - start
-    test_predicted["tree"] = tree.predict(X_test)
+    check_leaves([tree], f"tree at {where}")
+    test_predicted["tree"] = tree.predict(X_test) / CENTS_PER_THOUSAND
     # A tree grown to full depth fits its own sample exactly, so its training deviance is not recorded.
     train_deviance["tree"] = np.nan
 
@@ -1822,16 +1869,22 @@ def fit_setting(setting, X_train, y_train, X_other, seed):
     """Fit one candidate at one setting on X_train, y_train and predict the rows X_other: one fit.
 
     gbm is fitted with the number of trees of its setting, rf without
-    out-of-bag predictions. Returns the predictions, the seconds of the fit
-    call and, for ppml, what fit_ppml returns.
+    out-of-bag predictions and on the flows in whole cents (decision 26).
+    Returns the predictions, the seconds of the fit call and, for ppml, what
+    fit_ppml returns.
     """
     if setting["model"] == "ppml":
         ppml = fit_ppml(X_train, y_train, X_other)
         return {"predicted": ppml["test_predicted"], "seconds": ppml["seconds"], "ppml": ppml}
     if setting["model"] == "rf":
-        model = make_rf(rf_max_features(setting["rf_features"]), setting["rf_min_leaf"], seed, oob=False)
-    else:
-        model = make_gbm(setting["gbm_depth"], seed, trees=setting["gbm_trees"])
+        forest = make_rf(rf_max_features(setting["rf_features"]), setting["rf_min_leaf"], seed, oob=False)
+        y_cents = in_cents(y_train)
+        start = time.perf_counter()
+        forest.fit(X_train, y_cents)
+        seconds = time.perf_counter() - start
+        check_leaves(forest.estimators_, setting["config"])
+        return {"predicted": forest.predict(X_other) / CENTS_PER_THOUSAND, "seconds": seconds, "ppml": None}
+    model = make_gbm(setting["gbm_depth"], seed, trees=setting["gbm_trees"])
     start = time.perf_counter()
     model.fit(X_train, y_train)
     seconds = time.perf_counter() - start
@@ -2295,7 +2348,8 @@ def run_trees2x_draw(X_pool, y_pool, X_test, year, split_id, n, draw, rf_setting
     The sample and the seed are those of the base experiment,
     rng("draw", year, split_id, n, draw) and seed_int("model", year, split_id,
     n, draw). rf is fitted at its tuned setting (rf_setting) with 2 * RF_TREES
-    trees, without out-of-bag predictions, and scored with all its trees and
+    trees, without out-of-bag predictions and on the flows in whole cents
+    (decision 26), and scored with all its trees and
     with its first RF_TREES trees alone. scikit-learn draws the seed of each
     tree in turn from the one seed, so these first trees are the trees of the
     base forest, and with them alone the forest of the base run comes back.
@@ -2313,20 +2367,24 @@ def run_trees2x_draw(X_pool, y_pool, X_test, year, split_id, n, draw, rf_setting
 
     forest = make_rf(rf_max_features(rf_setting["rf_features"]), rf_setting["rf_min_leaf"], seed, oob=False,
                      trees=2 * RF_TREES)
+    y_cents = in_cents(y_train)  # decision 26, as in the base run
     start = time.perf_counter()
-    forest.fit(X_train, y_train)
+    forest.fit(X_train, y_cents)
     seconds = time.perf_counter() - start
+    check_leaves(forest.estimators_, f"{rf_setting['config']} with {2 * RF_TREES} trees")
     # The forest of the base run: the mean of the first RF_TREES trees, added up
-    # in the order scikit-learn's predict adds them.
+    # in the order scikit-learn's predict adds them, then turned back into
+    # thousands of dollars as in run_draw.
     first_trees = np.zeros(len(X_test))
     for tree in forest.estimators_[:RF_TREES]:
         first_trees += tree.predict(X_test)
     first_trees /= RF_TREES
+    first_trees /= CENTS_PER_THOUSAND
     rf_settings = {"model": "rf", "rf_features": rf_setting["rf_features"], "rf_min_leaf": rf_setting["rf_min_leaf"]}
     entries.append({"setting": {**rf_settings, "config": rf_setting["config"]}, "predicted": first_trees,
                     "seconds": seconds})
     entries.append({"setting": {**rf_settings, "config": f"{rf_setting['config']}_trees{2 * RF_TREES}"},
-                    "predicted": forest.predict(X_test), "seconds": seconds})
+                    "predicted": forest.predict(X_test) / CENTS_PER_THOUSAND, "seconds": seconds})
 
     depth = gbm_setting["gbm_depth"]
     counts = trees2x_counts(gbm_setting["gbm_trees"])
