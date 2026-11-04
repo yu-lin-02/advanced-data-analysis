@@ -1,11 +1,13 @@
-year,step,dropped_because,rows_before,rows_dropped,rows_left
-2017,1,origin and destination are the same country,63504,252,63252
-2019,1,origin and destination are the same country,63504,252,63252
-2017,2,either country does not exist in that year,63252,8262,54990
-2019,2,either country does not exist in that year,63252,8262,54990
-2017,3,no trade flow is recorded,54990,23106,31884
-2019,3,no trade flow is recorded,54990,23870,31120
-2017,4,the GDP of either country or the distance is missing,31884,2368,29516
-2019,4,the GDP of either country or the distance is missing,31120,2551,28569
-2017,5,any of the five indicators is missing,29516,554,28962
-2019,5,any of the five indicators is missing,28569,462,28107
+year,step,action,because,rows_before,rows_affected,rows_left
+2017,1,dropped,origin and destination are the same country,63504,252,63252
+2019,1,dropped,origin and destination are the same country,63504,252,63252
+2017,2,dropped,either country does not exist in that year,63252,8262,54990
+2019,2,dropped,either country does not exist in that year,63252,8262,54990
+2017,3,set to zero,"no trade flow is recorded, and both countries have a recorded flow that year",54990,18068,54990
+2019,3,set to zero,"no trade flow is recorded, and both countries have a recorded flow that year",54990,18832,54990
+2017,3,dropped,"no trade flow is recorded, and one of the countries has no recorded flow that year",54990,5038,49952
+2019,3,dropped,"no trade flow is recorded, and one of the countries has no recorded flow that year",54990,5038,49952
+2017,4,dropped,the GDP of either country or the distance is missing,49952,8946,41006
+2019,4,dropped,the GDP of either country or the distance is missing,49952,9752,40200
+2017,5,dropped,any of the five indicators is missing,41006,1610,39396
+2019,5,dropped,any of the five indicators is missing,40200,1200,39000
