@@ -1,12 +1,12 @@
 # Data
 
-<!-- Drafted with Claude (Anthropic). Asked for: a place to record where the data came from, its licence and how it was cleaned (Requirements 4.5 and 4.15), then filled in for the CEPII Gravity data when stage 1 was written, and the cleaning log when stage 2 was written (18 October 2026). -->
+<!-- Drafted with Claude (Anthropic). Asked for: a place to record where the data came from, its licence and how it was cleaned (Requirements 4.5 and 4.15), then filled in for the CEPII Gravity data when stage 1 was written, and the cleaning log when stage 2 was written (18 October 2026). Later asked for (4 November 2026, decision 24 of the build plan, "Rerun with zeros"): which run the cleaned table and the cleaning log describe. -->
 
 | File | Source | Downloaded on | Licence | In the repository? |
 |---|---|---|---|---|
 | `raw/Gravity_V202211.csv` | CEPII Gravity database, version V202211 ([page](https://www.cepii.fr/CEPII/en/bdd_modele/bdd_modele_item.asp?id=8), [zip](https://www.cepii.fr/DATA_DOWNLOAD/gravity/data/Gravity_csv_V202211.zip)) | Before 3 October 2026 (Yu's copy). Stage 1 prints the date of each new download. | Etalab Open Licence 2.0 | No: 1.25 GB, over GitHub's 100 MB limit. `code/01_get_data.ipynb` downloads it into `data/raw/`, which `.gitignore` leaves out (Requirement 4.15). |
 | `gravity_extract.csv` | Cut from the file above by `code/01_get_data.ipynb` | | Etalab Open Licence 2.0 | Yes, 8.3 MB |
-| `gravity_clean.csv` | Cleaned from the extract by `code/02_clean.ipynb` | | Etalab Open Licence 2.0 | Yes, once stage 2 has been run in the Nuvolos workspace. TODO: commit it from that run and give the size it prints. |
+| `gravity_clean.csv` | Cleaned from the extract by `code/02_clean.ipynb` | | Etalab Open Licence 2.0 | Yes. The committed file is that of the first run (commit `45d1c31`), which dropped every pair with no recorded flow; the run with the zero flows (decision 24 of the build plan) replaces it once stage 2 has been run in the Nuvolos workspace. TODO: give the size it prints. |
 
 ## The CEPII file
 
@@ -39,6 +39,8 @@ One row is one ordered pair of countries in one year, from the origin (`_o`) to 
 | `tradeflow_baci` | Trade flow from origin to destination, in thousands of current US dollars (source: BACI). Empty when no flow is recorded; it never holds a zero |
 
 ## Cleaning log
+
+The counts below are those of the first run, which dropped every row with no recorded flow at step 3: they are those of `results/cleaning_log.csv` in commit `45d1c31`. The run with the zero flows (decision 24 of the build plan) changes step 3: a row with no recorded flow gets the flow 0 when both of its countries have a recorded flow that year, and only the other rows with no recorded flow are dropped. Its counts are in section 3 of the build plan, where stage 2 checks them, and they replace those below once stage 2 has been run in the Nuvolos workspace.
 
 `code/02_clean.ipynb` takes these steps, in this order, and writes the same counts to `results/cleaning_log.csv`. Every count below is also an acceptance check in the notebook, against the counts read on Yu's copy of the CEPII file on 3 October 2026 (section 3 of `docs/build_plan.md`): a different number stops the run. The shares of trade are of the recorded trade, the total of the flows left after step 3.
 

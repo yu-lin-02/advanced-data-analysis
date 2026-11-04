@@ -1,16 +1,18 @@
 # Figures
 
-<!-- Drafted with Claude (Anthropic). Asked for: a note stating the rule for this folder. Later asked for (18 October 2026, section 5 of docs/build_plan.md): the files stage 7 will write. Later asked for (21 October 2026, decision 19 of the build plan): the checkpoint report on the rerun of part 1. Later asked for (21 October 2026, decision 20 of the build plan): the ridge line in the learning curves. Later asked for (23 October 2026, stage 7 of the build plan): one line per file that stage 7 writes. Later asked for (24 October 2026, decision 23 of the build plan): the tables of the models and of the variables. -->
+<!-- Drafted with Claude (Anthropic). Asked for: a note stating the rule for this folder. Later asked for (18 October 2026, section 5 of docs/build_plan.md): the files stage 7 will write. Later asked for (21 October 2026, decision 19 of the build plan): the checkpoint report on the rerun of part 1. Later asked for (21 October 2026, decision 20 of the build plan): the ridge line in the learning curves. Later asked for (23 October 2026, stage 7 of the build plan): one line per file that stage 7 writes. Later asked for (24 October 2026, decision 23 of the build plan): the tables of the models and of the variables. Later asked for (4 November 2026, decision 24 of the build plan): which run the files come from, and the zero flows in the tables of the cleaning and of the variables. -->
 
 Every file in this folder is written by `code/07_figures.ipynb` (Requirement 4.11). Nothing is added by hand. Figures are saved as `.pdf`, tables as `.csv` and `.tex` (decision 7 of `docs/build_plan.md`).
 
 `07_figures.ipynb` writes every file below from the files of stages 2 to 6 in `results/`, from `data/gravity_extract.csv` and `data/gravity_clean.csv`, and, for `tab_models`, from the settings in `code/helpers.py`, after checking that those files agree with each other (section 6 of the build plan, stage 7). Each table is a `.csv` with the full numbers and a `.tex` with the same rows rounded for the paper: a LaTeX `tabular` with the rules of the `booktabs` package, to be put in a table with its caption. Each figure is a `.pdf`, with a `.csv` of the numbers it draws. Captions are Yu's and go in the paper.
 
+Until the run with the zero trade flows (decision 24) replaces them, the files here are those of the first run, which dropped every pair with no recorded flow: written by stage 7 in commit `385448f`, and `tab_models` and `tab_variables` in `1c0c98a`.
+
 | File | What it shows |
 |---|---|
 | `tab_models` | The settings of `ppml`, `rf` and `gbm`: the scikit-learn estimator, the settings tuned with the values tried, and the fixed settings, read from `code/helpers.py` |
-| `tab_variables` | The columns of the CEPII extract, the unit of each and what stage 2 does with it, checked on `data/gravity_extract.csv` and `data/gravity_clean.csv` |
-| `tab_cleaning` | The rows of each year in the extract and after each cleaning step |
+| `tab_variables` | The columns of the CEPII extract, the unit of each and what stage 2 does with it, checked on `data/gravity_extract.csv` and `data/gravity_clean.csv`; with the zero flows, the line of the target states the rule of decision 24 |
+| `tab_cleaning` | The rows of each year in the extract and after each cleaning step; with the zero flows, the rows set to zero at step 3 have a line of their own |
 | `tab_summary` | Summary statistics of the target and the eight predictors in the cleaned table, per year |
 | `tab_tuned` | The tuned settings of the development year and the test errors by training size, with the model the size rule picks and the settings at an edge of their grid (`results/size_rule.csv`) |
 | `tab_cutoff` | The pattern of the error gap, the reversal, the cutoff with its interval, and the share of each pattern over the bootstrap resamples, for every comparison of the development year (base run, `noise`, `split2`) and of the analysis year (the test of H1, and the cutoff test of `ridge` beside it) |
