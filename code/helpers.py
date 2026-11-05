@@ -52,7 +52,10 @@
 # November 2026, decision 26 of docs/build_plan.md, after stage 3 with the zero
 # flows stopped on a leaf of the single tree that predicted 0): the single tree
 # and the forests fitted on the flows in whole cents, with a check that no leaf
-# of theirs predicts 0.
+# of theirs predicts 0. Later asked for (4 November 2026, step 7 of section 10
+# of docs/build_plan.md, after Yu's run of stage 7 with the zero flows printed
+# two values of components.pdf over each other): the texts of the values drawn
+# at one edge of a figure's panel stacked, so that no text covers another.
 """Code used by more than one notebook (Requirement 4.9).
 
 Every notebook imports this module in its first code cell, before pandas,
@@ -3114,9 +3117,13 @@ def draw_line(axes, sizes, values, key, label, limits, written, style="-", band=
     limits is drawn at the edge of the axis, as a triangle pointing beyond it,
     with the line's name (name, or else label) and the value written beside
     it, so that nothing is left out and one extreme value does not flatten
-    every other line. written counts the texts already written at each size
-    and edge of this panel, so that two texts do not overlap. Returns, for the
-    notebook to print, the sizes and values drawn at an edge.
+    every other line. written counts the texts already written at each edge
+    of this panel, so that two texts do not overlap: the texts at one edge are
+    stacked away from it, one line each, even when they belong to different
+    sizes. Within one line the largest size is written first, nearest the
+    edge, so that the longer text of a smaller size passes above the triangle
+    of the larger size instead of through it. Returns, for the notebook to
+    print, the sizes and values drawn at an edge, in the order of the sizes.
     """
     low, high = limits
     sizes = np.asarray(sizes, dtype=float)
@@ -3131,11 +3138,12 @@ def draw_line(axes, sizes, values, key, label, limits, written, style="-", band=
               linewidth=1.8 if style == "-" else 1.3, linestyle=style, label=label,
               markevery=list(np.flatnonzero(inside)))
     marked = []
-    for size, value in zip(sizes[beyond], values[beyond]):
+    # Largest size first (see the docstring); marked is put back in the order of the sizes at the end.
+    for size, value in sorted(zip(sizes[beyond], values[beyond]), reverse=True):
         above = value > high
         edge = "top" if above else "bottom"
-        count = written.get((size, edge), 0)
-        written[(size, edge)] = count + 1
+        count = written.get(edge, 0)
+        written[edge] = count + 1
         axes.plot(size, high if above else low, marker="^" if above else "v", color=colour, markersize=8,
                   clip_on=False, zorder=5)
         shift = -11 - 9 * count if above else 3 + 9 * count
@@ -3144,7 +3152,7 @@ def draw_line(axes, sizes, values, key, label, limits, written, style="-", band=
                       textcoords="offset points", fontsize=7, color=TEXT_COLOUR,
                       bbox={"facecolor": "white", "edgecolor": "none", "pad": 0.5, "alpha": 0.85})
         marked.append({"size": int(size), "value": value})
-    return marked
+    return sorted(marked, key=lambda mark: mark["size"])
 
 
 def gap_shares(gap_table):
